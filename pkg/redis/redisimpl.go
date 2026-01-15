@@ -128,11 +128,11 @@ func requestWorker(ctx context.Context, rdb *redis.Client, msgChannel chan api.R
 }
 
 // Puts msgs from the retry channel into a Redis sorted-set with a duration Score.
-func addMsgToRetryWorker(ctx context.Context, rdb *redis.Client, retryChannel chan api.RetryMessage, sortedSetName string) error {
+func addMsgToRetryWorker(ctx context.Context, rdb *redis.Client, retryChannel chan api.RetryMessage, sortedSetName string) {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 
 		case msg := <-retryChannel:
 			score := float64(time.Now().Unix()) + msg.BackoffDurationSeconds

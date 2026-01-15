@@ -27,7 +27,7 @@ spec:
         - /async-processor
         args:
           - --endpoint
-          - "http://inference-gateway-istio:80/v1/completions"
+          - "http://infra-sim-inference-gateway-istio.llm-d-sim.svc.cluster.local:80/v1/completions"
           - --redis.addr
           - "redis-master.redis.svc.cluster.local:6379"
         image: "{{ .Values.ap.image.repository }}:{{ .Values.ap.image.tag }}"

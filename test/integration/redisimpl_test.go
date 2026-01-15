@@ -19,7 +19,11 @@ func TestRedisImpl(t *testing.T) {
 	rAddr := s.Host() + ":" + s.Port()
 
 	ctx := context.Background()
-	flag.Set("redis.addr", rAddr)
+	err := flag.Set("redis.addr", rAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	flow := redis.NewRedisMQFlow()
 	flow.Start(ctx)
 
