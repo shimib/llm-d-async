@@ -134,21 +134,16 @@ TBD
 
 ## Development
 
-You can set the KIND environment with batch processor deployed with:
-```bash
-export BATCH_REDIS_ENABLED=true
-make env-dev-kind
-```
+TBD
 
-This will deploy a Redis server as the message queue.
 
 Then, in a new terminal window register a subscriber:
 
 ```bash
-kubectl exec `kubectl get pods -l app=redis -o=jsonpath='{.items[0].metadata.name}'` -- /usr/local/bin/redis-cli SUBSCRIBE batch-queue-result
+kubectl exec -n redis redis-master-0 -- redis-cli SUBSCRIBE api-queue-result
 ```
 
 Publish a message for batch processing:
 ```bash
-kubectl exec `kubectl get pods -l app=redis -o=jsonpath='{.items[0].metadata.name}'` -- /usr/local/bin/redis-cli PUBLISH batch-queue '{"id" : "testmsg", "payload":{ "model":"food-review", "prompt":"hi"}, "deadline" :"9999999999" }'
+kubectl exec -n redis redis-master-0 -- redis-cli PUBLISH api-queue '{"id" : "testmsg", "payload":{ "model":"unsloth/Meta-Llama-3.1-8B", "prompt":"hi"}, "deadline" :"9999999999" }'
 ```
