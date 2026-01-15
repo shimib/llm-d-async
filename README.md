@@ -140,10 +140,10 @@ TBD
 Then, in a new terminal window register a subscriber:
 
 ```bash
-kubectl exec -n redis redis-master-0 -- redis-cli SUBSCRIBE api-queue-result
+kubectl exec -n redis redis-master-0 -- redis-cli SUBSCRIBE result-queue
 ```
 
 Publish a message for batch processing:
 ```bash
-kubectl exec -n redis redis-master-0 -- redis-cli PUBLISH api-queue '{"id" : "testmsg", "payload":{ "model":"unsloth/Meta-Llama-3.1-8B", "prompt":"hi"}, "deadline" :"9999999999" }'
+kubectl exec -n redis redis-master-0 -- redis-cli PUBLISH request-queue '{"id" : "testmsg", "payload":{ "model":"unsloth/Meta-Llama-3.1-8B", "prompt":"hi"}, "deadline" :"9999999999" }'
 ```

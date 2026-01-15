@@ -84,7 +84,7 @@ func main() {
 	httpClient := http.DefaultClient
 
 	msrv, _ := metricsserver.NewServer(metricsServerOptions, restConfig, httpClient /* TODO: not sure about using the same one*/)
-	go msrv.Start(ctx)
+	go msrv.Start(ctx) // nolint:errcheck
 
 	/////
 

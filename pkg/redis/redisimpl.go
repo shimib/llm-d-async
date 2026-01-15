@@ -20,9 +20,9 @@ var (
 	redisAddr = flag.String("redis.addr", "localhost:6379", "address of the Redis server")
 
 	// TODO: support multiple request queues with metadata (for policy)
-	requestQueueName = flag.String("redis.request-queue-name", "api-queue", "name of the Redis queue for request messages")
-	retryQueueName   = flag.String("redis.retry-queue-name", "api-sortedset-retry", "name of the Redis sorted set for retry messages")
-	resultQueueName  = flag.String("redis.result-queue-name", "api-queue-result", "name of the Redis queue for result messages")
+	requestQueueName = flag.String("redis.request-queue-name", "request-queue", "name of the Redis channel for request messages")
+	retryQueueName   = flag.String("redis.retry-queue-name", "retry-sortedset", "name of the Redis sorted set for retry messages")
+	resultQueueName  = flag.String("redis.result-queue-name", "result-queue", "name of the Redis channel for result messages")
 )
 
 // TODO: think about what to do if Redis is down
