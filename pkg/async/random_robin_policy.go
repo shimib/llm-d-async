@@ -39,12 +39,18 @@ func (r *RandomRobinPolicy) MergeRequestChannels(channels []api.RequestChannel) 
 				}
 			} else {
 				rm := val.Interface().(api.RequestMessage)
-				mergedChannel <- api.EmbelishedRequestMessage{
-					RequestMessage:     rm,
-					OrgChannel:         channels[i1].Channel,
-					InferenceObjective: channels[i1].Metadata["inference-objective"].(string),
-					InferenceGateway:   channels[i1].Metadata["inference-gateway"].(string),
+				erm := api.EmbelishedRequestMessage{
+					RequestMessage: rm,
+					OrgChannel:     channels[i1].Channel,
+					// TODO: move from here
+					HttpHeaders: map[string]string{
+						"Content-Type":                  "application/json",
+						"x-gateway-inference-objective": channels[i1].Metadata["inference-objective"].(string),
+					},
+					InferenceGateway: channels[i1].Metadata["inference-gateway"].(string),
+					Metadata:         rm.Metadata,
 				}
+				mergedChannel <- erm
 			}
 
 		}

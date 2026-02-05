@@ -47,9 +47,8 @@ func Worker(ctx context.Context, httpClient *http.Client, requestChannel chan Em
 					resultChannel <- CreateErrorResultMessage(msg.Id, fmt.Sprintf("Failed to create request to inference: %s", err.Error()))
 					return
 				}
-				request.Header.Set("Content-Type", "application/json")
-				if msg.InferenceObjective != "" {
-					request.Header.Set("x-gateway-inference-objective", msg.InferenceObjective)
+				for k, v := range msg.HttpHeaders {
+					request.Header.Set(k, v)
 				}
 
 				result, err := httpClient.Do(request)
@@ -74,7 +73,7 @@ func Worker(ctx context.Context, httpClient *http.Client, requestChannel chan Em
 						metrics.SuccessfulReqs.Inc()
 						resultChannel <- ResultMessage{
 							Id:      msg.Id,
-							Payload: payloadBytes,
+							Payload: string(payloadBytes),
 						}
 					}
 				}
@@ -134,7 +133,7 @@ func retryMessage(msg EmbelishedRequestMessage, retryChannel chan RetryMessage, 
 func CreateErrorResultMessage(id string, errMsg string) ResultMessage {
 	return ResultMessage{
 		Id:      id,
-		Payload: []byte(`{"error": "` + errMsg + `"}`),
+		Payload: `{"error": "` + errMsg + `"}`,
 	}
 }
 

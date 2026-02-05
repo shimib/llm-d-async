@@ -18,9 +18,9 @@ func TestRetryMessage_deadlinePassed(t *testing.T) {
 			RetryCount:      0,
 			DeadlineUnixSec: fmt.Sprintf("%d", time.Now().Add(time.Second*-10).Unix()),
 		},
-		OrgChannel:         make(chan RequestMessage, 1),
-		InferenceObjective: "",
-		InferenceGateway:   "",
+		OrgChannel:       make(chan RequestMessage, 1),
+		HttpHeaders:      map[string]string{},
+		InferenceGateway: "",
 	}
 	retryMessage(msg, retryChannel, resultChannel)
 	if len(retryChannel) > 0 {
@@ -50,9 +50,9 @@ func TestRetryMessage_retry(t *testing.T) {
 			RetryCount:      0,
 			DeadlineUnixSec: fmt.Sprintf("%d", time.Now().Add(time.Second*10).Unix()),
 		},
-		OrgChannel:         make(chan RequestMessage, 1),
-		InferenceObjective: "",
-		InferenceGateway:   "",
+		OrgChannel:       make(chan RequestMessage, 1),
+		HttpHeaders:      map[string]string{},
+		InferenceGateway: "",
 	}
 	retryMessage(msg, retryChannel, resultChannel)
 	if len(resultChannel) > 0 {
@@ -107,11 +107,11 @@ func TestSheddedRequest(t *testing.T) {
 			Id:              msgId,
 			RetryCount:      0,
 			DeadlineUnixSec: fmt.Sprintf(("%d"), deadline),
-			Payload:         []byte(`{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0}`),
+			Payload:         map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
 		},
-		OrgChannel:         make(chan RequestMessage),
-		InferenceGateway:   "http://localhost:30080/v1/completions",
-		InferenceObjective: "",
+		OrgChannel:       make(chan RequestMessage),
+		InferenceGateway: "http://localhost:30080/v1/completions",
+		HttpHeaders:      map[string]string{},
 	}
 
 	select {
@@ -148,11 +148,11 @@ func TestSuccessfulRequest(t *testing.T) {
 			Id:              msgId,
 			RetryCount:      0,
 			DeadlineUnixSec: fmt.Sprintf(("%d"), deadline),
-			Payload:         []byte(`{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0}`),
+			Payload:         map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
 		},
-		OrgChannel:         make(chan RequestMessage),
-		InferenceGateway:   "http://localhost:30080/v1/completions",
-		InferenceObjective: "",
+		OrgChannel:       make(chan RequestMessage),
+		InferenceGateway: "http://localhost:30080/v1/completions",
+		HttpHeaders:      map[string]string{},
 	}
 
 	select {
