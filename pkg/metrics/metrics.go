@@ -23,7 +23,7 @@ var (
 		Help: "Total number of async requests.",
 	})
 	ExceededDeadlineReqs = prometheus.NewCounter(prometheus.CounterOpts{
-		Subsystem: SchedulerSubsystem, Name: "async_ßexceeded_deadline_requests_total",
+		Subsystem: SchedulerSubsystem, Name: "async_exceeded_deadline_requests_total",
 		Help: "Total number of async requests that exceeded their deadline.",
 	})
 	FailedReqs = prometheus.NewCounter(prometheus.CounterOpts{

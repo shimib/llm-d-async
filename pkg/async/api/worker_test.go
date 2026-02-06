@@ -99,7 +99,7 @@ func TestSheddedRequest(t *testing.T) {
 	resultChannel := make(chan ResultMessage, 1)
 	ctx := context.Background()
 
-	go Worker(ctx, httpclient, requestChannel, retryChannel, resultChannel)
+	go Worker(ctx, Characteristics{HasExternalBackoff: false}, httpclient, requestChannel, retryChannel, resultChannel)
 	deadline := time.Now().Add(time.Second * 100).Unix()
 
 	requestChannel <- EmbelishedRequestMessage{
@@ -139,7 +139,7 @@ func TestSuccessfulRequest(t *testing.T) {
 	resultChannel := make(chan ResultMessage, 1)
 	ctx := context.Background()
 
-	go Worker(ctx, httpclient, requestChannel, retryChannel, resultChannel)
+	go Worker(ctx, Characteristics{HasExternalBackoff: false}, httpclient, requestChannel, retryChannel, resultChannel)
 
 	deadline := time.Now().Add(time.Second * 100).Unix()
 

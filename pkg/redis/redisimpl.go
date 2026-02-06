@@ -126,6 +126,12 @@ func requestWorker(ctx context.Context, rdb *redis.Client, msgChannel chan api.R
 
 }
 
+func (r *RedisMQFlow) Characteristics() api.Characteristics {
+	return api.Characteristics{
+		HasExternalBackoff: false,
+	}
+}
+
 // Puts msgs from the retry channel into a Redis sorted-set with a duration Score.
 func addMsgToRetryWorker(ctx context.Context, rdb *redis.Client, retryChannel chan api.RetryMessage, sortedSetName string) {
 	logger := log.FromContext(ctx)

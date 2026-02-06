@@ -18,7 +18,7 @@ const (
 )
 
 // InitLogging initializes the controller-runtime logger with zap backend.
-func InitLogging(opts *zap.Options, logVerbosity *int) {
+func InitLogging(opts *zap.Options, logVerbosity int) {
 	// Unless -zap-log-level is explicitly set, use -v
 	useV := true
 	flag.Visit(func(f *flag.Flag) {
@@ -28,7 +28,7 @@ func InitLogging(opts *zap.Options, logVerbosity *int) {
 	})
 	if useV {
 		// See https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/log/zap#Options.Level
-		lvl := -1 * (*logVerbosity)
+		lvl := -1 * (logVerbosity)
 		opts.Level = uberzap.NewAtomicLevelAt(zapcore.Level(int8(lvl)))
 	}
 

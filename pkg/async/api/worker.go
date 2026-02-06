@@ -19,7 +19,7 @@ import (
 
 var baseDelaySeconds = 2
 
-func Worker(ctx context.Context, httpClient *http.Client, requestChannel chan EmbelishedRequestMessage,
+func Worker(ctx context.Context, characteristics Characteristics, httpClient *http.Client, requestChannel chan EmbelishedRequestMessage,
 	retryChannel chan RetryMessage, resultChannel chan ResultMessage) {
 
 	logger := log.FromContext(ctx)
@@ -44,7 +44,7 @@ func Worker(ctx context.Context, httpClient *http.Client, requestChannel chan Em
 				request, err := http.NewRequestWithContext(ctx, "POST", msg.InferenceGateway, bytes.NewBuffer(payloadBytes))
 				if err != nil {
 					metrics.FailedReqs.Inc()
-					resultChannel <- CreateErrorResultMessage(msg.Id, fmt.Sprintf("Failed to create request to inference: %s", err.Error()))
+					resultChannel <- CreateErrorResultMessage(msg.RequestMessage, fmt.Sprintf("Failed to create request to inference: %s", err.Error()))
 					return
 				}
 				for k, v := range msg.HttpHeaders {
@@ -54,7 +54,7 @@ func Worker(ctx context.Context, httpClient *http.Client, requestChannel chan Em
 				result, err := httpClient.Do(request)
 				if err != nil {
 					metrics.FailedReqs.Inc()
-					resultChannel <- CreateErrorResultMessage(msg.Id, fmt.Sprintf("Failed to send request to inference: %s", err.Error()))
+					resultChannel <- CreateErrorResultMessage(msg.RequestMessage, fmt.Sprintf("Failed to send request to inference: %s", err.Error()))
 					return
 				}
 				defer result.Body.Close()
@@ -88,20 +88,20 @@ func validateAndMarshall(resultChannel chan ResultMessage, msg RequestMessage) [
 	deadline, err := strconv.ParseInt(msg.DeadlineUnixSec, 10, 64)
 	if err != nil {
 		metrics.FailedReqs.Inc()
-		resultChannel <- CreateErrorResultMessage(msg.Id, "Failed to parse deadline, should be in Unix seconds.")
+		resultChannel <- CreateErrorResultMessage(msg, "Failed to parse deadline, should be in Unix seconds.")
 		return nil
 	}
 
 	if deadline < time.Now().Unix() {
 		metrics.ExceededDeadlineReqs.Inc()
-		resultChannel <- CreateDeadlineExceededResultMessage(msg.Id)
+		resultChannel <- CreateDeadlineExceededResultMessage(msg)
 		return nil
 	}
 
 	payloadBytes, err := json.Marshal(msg.Payload)
 	if err != nil {
 		metrics.FailedReqs.Inc()
-		resultChannel <- CreateErrorResultMessage(msg.Id, fmt.Sprintf("Failed to marshal message's payload: %s", err.Error()))
+		resultChannel <- CreateErrorResultMessage(msg, fmt.Sprintf("Failed to marshal message's payload: %s", err.Error()))
 		return nil
 	}
 	return payloadBytes
@@ -111,13 +111,13 @@ func validateAndMarshall(resultChannel chan ResultMessage, msg RequestMessage) [
 func retryMessage(msg EmbelishedRequestMessage, retryChannel chan RetryMessage, resultChannel chan ResultMessage) {
 	deadline, err := strconv.ParseInt(msg.DeadlineUnixSec, 10, 64)
 	if err != nil { // Can't really happen because this was already parsed in the past. But we don't care to have this branch.
-		resultChannel <- CreateErrorResultMessage(msg.Id, "Failed to parse deadline. Should be in Unix time")
+		resultChannel <- CreateErrorResultMessage(msg.RequestMessage, "Failed to parse deadline. Should be in Unix time")
 		return
 	}
 	secondsToDeadline := deadline - time.Now().Unix()
 	if secondsToDeadline < 0 {
 		metrics.ExceededDeadlineReqs.Inc()
-		resultChannel <- CreateDeadlineExceededResultMessage(msg.Id)
+		resultChannel <- CreateDeadlineExceededResultMessage(msg.RequestMessage)
 	} else {
 		msg.RetryCount++
 		finalDuration := expBackoffDuration(msg.RetryCount, int(secondsToDeadline))
@@ -130,15 +130,16 @@ func retryMessage(msg EmbelishedRequestMessage, retryChannel chan RetryMessage, 
 	}
 
 }
-func CreateErrorResultMessage(id string, errMsg string) ResultMessage {
+func CreateErrorResultMessage(msg RequestMessage, errMsg string) ResultMessage {
 	return ResultMessage{
-		Id:      id,
-		Payload: `{"error": "` + errMsg + `"}`,
+		Id:       msg.Id,
+		Payload:  `{"error": "` + errMsg + `"}`,
+		Metadata: msg.Metadata,
 	}
 }
 
-func CreateDeadlineExceededResultMessage(id string) ResultMessage {
-	return CreateErrorResultMessage(id, "deadline exceeded")
+func CreateDeadlineExceededResultMessage(msg RequestMessage) ResultMessage {
+	return CreateErrorResultMessage(msg, "deadline exceeded")
 }
 
 func expBackoffDuration(retryCount int, secondsToDeadline int) float64 {

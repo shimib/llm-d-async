@@ -11,6 +11,7 @@ import (
 	"github.com/llm-d-incubation/llm-d-async/pkg/async"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
+	"github.com/llm-d-incubation/llm-d-async/pkg/pubsub"
 	"github.com/llm-d-incubation/llm-d-async/pkg/redis"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -49,7 +50,7 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	logging.InitLogging(&opts, &loggerVerbosity)
+	logging.InitLogging(&opts, loggerVerbosity)
 	defer logging.Sync() // nolint:errcheck
 
 	setupLog := ctrl.Log.WithName("setup")
@@ -99,6 +100,8 @@ func main() {
 	switch messageQueueImpl {
 	case "redis-pubsub":
 		impl = redis.NewRedisMQFlow()
+	case "gcp-pubsub":
+		impl = pubsub.NewGCPPubSubMQFlow()
 	default:
 		setupLog.Error(nil, "Unknown message queue implementation", "message-queue-impl", messageQueueImpl)
 		os.Exit(1)
@@ -106,7 +109,7 @@ func main() {
 
 	requestChannel := policy.MergeRequestChannels(impl.RequestChannels()).Channel
 	for w := 1; w <= concurrency; w++ {
-		go api.Worker(ctx, httpClient, requestChannel, impl.RetryChannel(), impl.ResultChannel())
+		go api.Worker(ctx, impl.Characteristics(), httpClient, requestChannel, impl.RetryChannel(), impl.ResultChannel())
 	}
 
 	impl.Start(ctx)

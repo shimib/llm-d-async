@@ -3,6 +3,10 @@ package api
 import "context"
 
 type Flow interface {
+
+	// Characteristic of the impl
+	Characteristics() Characteristics
+
 	// starts processing requests.
 	Start(ctx context.Context)
 
@@ -13,6 +17,10 @@ type Flow interface {
 	RetryChannel() chan RetryMessage
 	// returns the channel for storing the results. Implementation is responsible for consuming messages on this channel.
 	ResultChannel() chan ResultMessage
+}
+
+type Characteristics struct {
+	HasExternalBackoff bool
 }
 
 type RequestMergePolicy interface {
@@ -54,6 +62,7 @@ type RetryMessage struct {
 
 // optional field of httpstatus, golang error?
 type ResultMessage struct {
-	Id      string `json:"id"`
-	Payload string `json:"payload"`
+	Id       string            `json:"id"`
+	Payload  string            `json:"payload"`
+	Metadata map[string]string `json:"-"`
 }
