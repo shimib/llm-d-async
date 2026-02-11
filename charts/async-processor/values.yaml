@@ -9,7 +9,14 @@ ap:
     port: 9090
     secure: false
 
+  gcpPubSub:
+    enabled: false
+    requestSubscriberId: xxx
+    resultTopicId: xxx 
+
+
   redis:
+     enabled: true
      port: 6379
      host: "redis-master.redis.svc.cluster.local"
      inferenceGateway: "http://infra-sim-inference-gateway-istio.llm-d-sim.svc.cluster.local:80/v1/completions"

@@ -72,8 +72,9 @@ func Worker(ctx context.Context, characteristics Characteristics, httpClient *ht
 					} else {
 						metrics.SuccessfulReqs.Inc()
 						resultChannel <- ResultMessage{
-							Id:      msg.Id,
-							Payload: string(payloadBytes),
+							Id:       msg.Id,
+							Payload:  string(payloadBytes),
+							Metadata: msg.Metadata,
 						}
 					}
 				}

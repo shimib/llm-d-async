@@ -26,10 +26,15 @@ spec:
       - command:
         - /async-processor
         args:
+          {{- if .Values.redis.enabled }}
+          - --message-queue-impl=redis-pubsub
           - --redis.inference-gateway
           - "{{ .Values.ap.redis.inferenceGateway }}"
           - --redis.addr
           - "{{ .Values.ap.redis.host }}:{{ .Values.ap.redis.port }}"
+          {{- else if .Values.gcpPubSub.enabled  }}
+          - --message-queue-impl=gcp-pubsub
+          {{- end}}
           - --metrics-endpoint-auth={{ .Values.ap.metrics.secure }}
         image: "{{ .Values.ap.image.repository }}:{{ .Values.ap.image.tag }}"
         imagePullPolicy: "{{ .Values.ap.imagePullPolicy }}"

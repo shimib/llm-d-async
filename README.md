@@ -74,7 +74,7 @@ make deploy-ap-on-k8s
 
 - `concurrency`: the number of concurrenct workers, default is 8.
 - `request-merge-policy`: Currently only supporting <u>random-robin</u> policy.
-- `message-queue-impl`: Currently only supporting <u>redis-pubsub</u> for ephemeral Redis-based implementation.
+- `message-queue-impl`: Implementation of the queueing system. Options are <u>gcp-pubsub</u> for GCP PubSub and  <u>redis-pubsub</u> for ephemeral Redis-based implementation.
 
 <i>additional parameters may be specified for concrete message queue implementations</i>
 
@@ -149,7 +149,25 @@ An example implementation based on Redis channels is provided.
 
 ### GCP Pub/Sub
 
-TBD
+The GCP PubSub implementation requires the user to configure the following:
+
+- Requests Topic and a **Subscription** having the following configurations:
+    - Exactly once delivery.
+    - Retries with exponential backoff.
+    - Dead Letter Queue (DLQ).
+- Results Topic.
+
+![Async Processor - GCP PubSub Architecture](/docs/images/gcp_pubsub_architecture.png "AP - GCP PubSub") 
+
+#### GCP PubSub Command line parameters
+
+- `pubsub.project-id`: The name GCP project ID using the PubSub API.
+- `pubsub.inference-gateway`: Inference gateway endppoint. Requests will be sent to this endpoint.
+- `pubsub.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty). 
+- `pubsub.request-subscriber-id`: The subscriber ID for the requests topic.
+- `pubsub.result-topic-id`: The results topic ID.
+
+**NOTE:** the `pubsub.inference-gateway` and `pubsub.inference-objective` will soon migrate to a per request queue definitions so an index number will be added to the flag name.
 
 ## Development
 

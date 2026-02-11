@@ -20,8 +20,10 @@ var pubSubClient *pubsub.Client
 var (
 	projectID = flag.String("pubsub.project-id", "", "GCP project ID for PubSub")
 	// TODO: support multiples
+	inferenceGateway    = flag.String("pubsub.inference-gateway", "http://localhost:30080/v1/completions", "inference gateway endpoint")
+	inferenceObjective  = flag.String("pubsub.inference-objective", "", "inference objective to use in requests")
 	requestSubscriberID = flag.String("pubsub.request-subscriber-id", "", "GCP PubSub request topic subscriber ID")
-	resultTopicID       = flag.String("pubsub.result-topic-id", "result-topic", "GCP PubSub topic ID for results")
+	resultTopicID       = flag.String("pubsub.result-topic-id", "", "GCP PubSub topic ID for results")
 	resultChannels      sync.Map
 )
 
@@ -67,8 +69,8 @@ func (r *PubSubMQFlow) Characteristics() api.Characteristics {
 func (r *PubSubMQFlow) RequestChannels() []api.RequestChannel {
 
 	metadata := map[string]any{
-		// "inference-gateway":   *inferenceGateway,
-		// "inference-objective": *inferenceObjective,
+		"inference-gateway":   *inferenceGateway,
+		"inference-objective": *inferenceObjective,
 	}
 
 	return []api.RequestChannel{{Channel: r.requestChannel, Metadata: metadata}}
@@ -169,7 +171,7 @@ func requestWorker(ctx context.Context, pubSubClient *pubsub.Client, subscriberI
 	})
 	// TODO
 	if err != nil {
-		fmt.Println(err)
+		logger.V(logutil.DEFAULT).Error(err, "Fail to receive messages from request subscription")
 	}
 
 }
