@@ -5,14 +5,14 @@ go 1.24.1
 toolchain go1.24.2
 
 require (
-	cloud.google.com/go/pubsub v1.50.0
+	cloud.google.com/go/pubsub/v2 v2.3.0
 	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/go-logr/logr v1.4.3
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.2
 	go.uber.org/zap v1.27.0
-	k8s.io/client-go v0.34.2
-	sigs.k8s.io/controller-runtime v0.22.4
+	k8s.io/client-go v0.34.4
+	sigs.k8s.io/controller-runtime v0.22.5
 	sigs.k8s.io/gateway-api-inference-extension v1.2.1
 )
 
@@ -23,7 +23,6 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.8.4 // indirect
 	cloud.google.com/go/iam v1.5.2 // indirect
-	cloud.google.com/go/pubsub/v2 v2.3.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
@@ -100,11 +99,11 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/api v0.34.2 // indirect
-	k8s.io/apiextensions-apiserver v0.34.2 // indirect
-	k8s.io/apimachinery v0.34.2 // indirect
-	k8s.io/apiserver v0.34.2 // indirect
-	k8s.io/component-base v0.34.2 // indirect
+	k8s.io/api v0.34.4 // indirect
+	k8s.io/apiextensions-apiserver v0.34.3 // indirect
+	k8s.io/apimachinery v0.34.4 // indirect
+	k8s.io/apiserver v0.34.3 // indirect
+	k8s.io/component-base v0.34.3 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250814151709-d7b6acb124c3 // indirect
 	k8s.io/utils v0.0.0-20250820121507-0af2bda4dd1d // indirect
