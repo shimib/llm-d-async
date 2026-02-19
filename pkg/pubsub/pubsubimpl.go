@@ -20,7 +20,7 @@ var pubSubClient *pubsub.Client
 var (
 	projectID = flag.String("pubsub.project-id", "", "GCP project ID for PubSub")
 	// TODO: support multiples
-	inferenceGateway    = flag.String("pubsub.inference-gateway", "http://localhost:30080/v1/completions", "inference gateway endpoint")
+	requestPathURL      = flag.String("pubsub.request-path-url", "/v1/completions", "inference request path url")
 	inferenceObjective  = flag.String("pubsub.inference-objective", "", "inference objective to use in requests")
 	requestSubscriberID = flag.String("pubsub.request-subscriber-id", "", "GCP PubSub request topic subscriber ID")
 	resultTopicID       = flag.String("pubsub.result-topic-id", "", "GCP PubSub topic ID for results")
@@ -69,7 +69,7 @@ func (r *PubSubMQFlow) Characteristics() api.Characteristics {
 func (r *PubSubMQFlow) RequestChannels() []api.RequestChannel {
 
 	metadata := map[string]any{
-		"inference-gateway":   *inferenceGateway,
+		"request-path-url":    *requestPathURL,
 		"inference-objective": *inferenceObjective,
 	}
 

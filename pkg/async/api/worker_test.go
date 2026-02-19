@@ -18,9 +18,9 @@ func TestRetryMessage_deadlinePassed(t *testing.T) {
 			RetryCount:      0,
 			DeadlineUnixSec: fmt.Sprintf("%d", time.Now().Add(time.Second*-10).Unix()),
 		},
-		OrgChannel:       make(chan RequestMessage, 1),
-		HttpHeaders:      map[string]string{},
-		InferenceGateway: "",
+		OrgChannel:     make(chan RequestMessage, 1),
+		HttpHeaders:    map[string]string{},
+		RequestPathURL: "",
 	}
 	retryMessage(msg, retryChannel, resultChannel)
 	if len(retryChannel) > 0 {
@@ -50,9 +50,9 @@ func TestRetryMessage_retry(t *testing.T) {
 			RetryCount:      0,
 			DeadlineUnixSec: fmt.Sprintf("%d", time.Now().Add(time.Second*10).Unix()),
 		},
-		OrgChannel:       make(chan RequestMessage, 1),
-		HttpHeaders:      map[string]string{},
-		InferenceGateway: "",
+		OrgChannel:     make(chan RequestMessage, 1),
+		HttpHeaders:    map[string]string{},
+		RequestPathURL: "",
 	}
 	retryMessage(msg, retryChannel, resultChannel)
 	if len(resultChannel) > 0 {
@@ -99,7 +99,7 @@ func TestSheddedRequest(t *testing.T) {
 	resultChannel := make(chan ResultMessage, 1)
 	ctx := context.Background()
 
-	go Worker(ctx, Characteristics{HasExternalBackoff: false}, httpclient, requestChannel, retryChannel, resultChannel)
+	go Worker(ctx, Characteristics{HasExternalBackoff: false}, "http://localhost:30800", httpclient, requestChannel, retryChannel, resultChannel)
 	deadline := time.Now().Add(time.Second * 100).Unix()
 
 	requestChannel <- EmbelishedRequestMessage{
@@ -109,9 +109,9 @@ func TestSheddedRequest(t *testing.T) {
 			DeadlineUnixSec: fmt.Sprintf(("%d"), deadline),
 			Payload:         map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
 		},
-		OrgChannel:       make(chan RequestMessage),
-		InferenceGateway: "http://localhost:30080/v1/completions",
-		HttpHeaders:      map[string]string{},
+		OrgChannel:     make(chan RequestMessage),
+		RequestPathURL: "/v1/completions",
+		HttpHeaders:    map[string]string{},
 	}
 
 	select {
@@ -139,7 +139,7 @@ func TestSuccessfulRequest(t *testing.T) {
 	resultChannel := make(chan ResultMessage, 1)
 	ctx := context.Background()
 
-	go Worker(ctx, Characteristics{HasExternalBackoff: false}, httpclient, requestChannel, retryChannel, resultChannel)
+	go Worker(ctx, Characteristics{HasExternalBackoff: false}, "http://localhost:30800", httpclient, requestChannel, retryChannel, resultChannel)
 
 	deadline := time.Now().Add(time.Second * 100).Unix()
 
@@ -150,9 +150,9 @@ func TestSuccessfulRequest(t *testing.T) {
 			DeadlineUnixSec: fmt.Sprintf(("%d"), deadline),
 			Payload:         map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
 		},
-		OrgChannel:       make(chan RequestMessage),
-		InferenceGateway: "http://localhost:30080/v1/completions",
-		HttpHeaders:      map[string]string{},
+		OrgChannel:     make(chan RequestMessage),
+		RequestPathURL: "/v1/completions",
+		HttpHeaders:    map[string]string{},
 	}
 
 	select {

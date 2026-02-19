@@ -1,4 +1,5 @@
 ap:
+  igwBaseURL: "http://infra-sim-inference-gateway-istio.llm-d-sim.svc.cluster.local:80"
   image:
     repository: ghcr.io/llm-d/async-processor
     tag: v0.0.1
@@ -13,13 +14,14 @@ ap:
     enabled: false
     requestSubscriberId: xxx
     resultTopicId: xxx 
+    requestPathURL: "/v1/completions"
 
 
   redis:
      enabled: true
      port: 6379
      host: "redis-master.redis.svc.cluster.local"
-     inferenceGateway: "http://infra-sim-inference-gateway-istio.llm-d-sim.svc.cluster.local:80/v1/completions"
+     requestPathURL: "/v1/completions"
   
 
 

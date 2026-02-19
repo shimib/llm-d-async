@@ -49,10 +49,10 @@ type EmbelishedRequestChannel struct {
 
 type EmbelishedRequestMessage struct {
 	RequestMessage
-	OrgChannel       chan RequestMessage
-	HttpHeaders      map[string]string
-	InferenceGateway string
-	Metadata         map[string]string
+	OrgChannel     chan RequestMessage
+	HttpHeaders    map[string]string
+	RequestPathURL string
+	Metadata       map[string]string
 }
 
 type RetryMessage struct {

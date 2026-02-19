@@ -34,9 +34,9 @@ func TestRedisImpl(t *testing.T) {
 				DeadlineUnixSec: strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10),
 				Payload:         map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
 			},
-			OrgChannel:       make(chan api.RequestMessage),
-			InferenceGateway: "http://localhost:30080/v1/completions",
-			HttpHeaders:      map[string]string{},
+			OrgChannel:     make(chan api.RequestMessage),
+			RequestPathURL: "/v1/completions",
+			HttpHeaders:    map[string]string{},
 		},
 		BackoffDurationSeconds: 2,
 	}

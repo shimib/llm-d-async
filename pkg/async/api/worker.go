@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"path"
 	"strconv"
 	"time"
 
@@ -19,7 +20,7 @@ import (
 
 var baseDelaySeconds = 2
 
-func Worker(ctx context.Context, characteristics Characteristics, httpClient *http.Client, requestChannel chan EmbelishedRequestMessage,
+func Worker(ctx context.Context, characteristics Characteristics, igwBaseURL string, httpClient *http.Client, requestChannel chan EmbelishedRequestMessage,
 	retryChannel chan RetryMessage, resultChannel chan ResultMessage) {
 
 	logger := log.FromContext(ctx)
@@ -41,7 +42,7 @@ func Worker(ctx context.Context, characteristics Characteristics, httpClient *ht
 			// Using a function object for easy boundries for 'return' and 'defer'!
 			sendInferenceRequest := func() {
 				logger.V(logutil.DEBUG).Info("Sending inference request.")
-				request, err := http.NewRequestWithContext(ctx, "POST", msg.InferenceGateway, bytes.NewBuffer(payloadBytes))
+				request, err := http.NewRequestWithContext(ctx, "POST", path.Join(igwBaseURL, msg.RequestPathURL), bytes.NewBuffer(payloadBytes))
 				if err != nil {
 					metrics.FailedReqs.Inc()
 					resultChannel <- CreateErrorResultMessage(msg.RequestMessage, fmt.Sprintf("Failed to create request to inference: %s", err.Error()))
