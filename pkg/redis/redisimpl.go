@@ -20,7 +20,7 @@ var (
 	redisAddr = flag.String("redis.addr", "localhost:6379", "address of the Redis server")
 
 	// TODO: support multiple request queues with metadata (for policy), maybe 'redis.request-1-inference-gateway' and other request related flags/parameters
-	inferenceGateway   = flag.String("redis.inference-gateway", "http://localhost:30080/v1/completions", "inference gateway endpoint")
+	requestPathURL     = flag.String("redis.request-path-url", "/v1/completions", "request path url")
 	inferenceObjective = flag.String("redis.inference-objective", "", "inference objective to use in requests")
 	requestQueueName   = flag.String("redis.request-queue-name", "request-queue", "name of the Redis channel for request messages")
 
@@ -59,7 +59,7 @@ func (r *RedisMQFlow) Start(ctx context.Context) {
 func (r *RedisMQFlow) RequestChannels() []api.RequestChannel {
 
 	metadata := map[string]any{
-		"inference-gateway":   *inferenceGateway,
+		"request-path-url":    *requestPathURL,
 		"inference-objective": *inferenceObjective,
 	}
 

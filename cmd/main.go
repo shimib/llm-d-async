@@ -33,6 +33,8 @@ func main() {
 	var requestMergePolicy string
 	var messageQueueImpl string
 
+	var igwBaseURL string
+
 	flag.IntVar(&loggerVerbosity, "v", logging.DEFAULT, "number for the log level verbosity")
 
 	flag.IntVar(&metricsPort, "metrics-port", 9090, "The metrics port")
@@ -40,6 +42,7 @@ func main() {
 
 	flag.IntVar(&concurrency, "concurrency", 8, "number of concurrent workers")
 
+	flag.StringVar(&igwBaseURL, "igw-base-url", "", "Base URL of the IGW (e.g. https://localhost:30800)")
 	flag.StringVar(&requestMergePolicy, "request-merge-policy", "random-robin", "The request merge policy to use. Supported policies: random-robin")
 	flag.StringVar(&messageQueueImpl, "message-queue-impl", "redis-pubsub", "The message queue implementation to use. Supported implementations: redis-pubsub")
 
@@ -109,7 +112,8 @@ func main() {
 
 	requestChannel := policy.MergeRequestChannels(impl.RequestChannels()).Channel
 	for w := 1; w <= concurrency; w++ {
-		go api.Worker(ctx, impl.Characteristics(), httpClient, requestChannel, impl.RetryChannel(), impl.ResultChannel())
+
+		go api.Worker(ctx, impl.Characteristics(), igwBaseURL, httpClient, requestChannel, impl.RetryChannel(), impl.ResultChannel())
 	}
 
 	impl.Start(ctx)

@@ -26,14 +26,19 @@ spec:
       - command:
         - /async-processor
         args:
+          - --igw-base-url={{ .Values.ap.igwBaseURL }}
           {{- if .Values.redis.enabled }}
           - --message-queue-impl=redis-pubsub
-          - --redis.inference-gateway
-          - "{{ .Values.ap.redis.inferenceGateway }}"
+          - --redis.request-path-url
+          - "{{ .Values.ap.redis.requestPathURL }}"
           - --redis.addr
           - "{{ .Values.ap.redis.host }}:{{ .Values.ap.redis.port }}"
           {{- else if .Values.gcpPubSub.enabled  }}
           - --message-queue-impl=gcp-pubsub
+          - pubsub.request-subscriber-id={{ .Values.ap.gcpPubSub.requestSubscriberId }}
+          - pubsub.result-topic-id={{ .Values.ap.gcpPubSub.resultTopicId }}
+          - --pubsub.request-path-url
+          - "{{ .Values.ap.gcpPubSub.requestPathURL }}"
           {{- end}}
           - --metrics-endpoint-auth={{ .Values.ap.metrics.secure }}
         image: "{{ .Values.ap.image.repository }}:{{ .Values.ap.image.tag }}"
