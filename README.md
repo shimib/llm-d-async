@@ -37,8 +37,10 @@ The architecture adheres to the following core principles:
 - [Retries](#retries)
 - [Results](#results)   
 - [Implementations](#implementations)
-    - [Redis Channels](#redis-channels)
-      - [Redis Command line parameters](#redis-command-line-parameters)
+    - [Redis Sorted Set (Persisted)](#redis-sorted-set-persisted)
+      - [Redis Sorted Set Command line parameters](#redis-sorted-set-command-line-parameters)
+    - [Redis Channels (Ephemeral)](#redis-channels)
+      - [Redis Channels Command line parameters](#redis-channels-command-line-parameters)
         - [Multiple Queues Configuration File Syntax](#multiple-queues-configuration-file-syntax)
     - [GCP Pub/Sub](#gcp-pub-sub)
       - [GCP PubSub Command line parameters](#gcp-pubsub-command-line-parameters)
@@ -74,10 +76,10 @@ make deploy-ap-on-k8s
      ```
 
 ## Command line parameters
-
-- `concurrency`: the number of concurrenct workers, default is 8.
+- `igw-base-url`: Base URL of the IGW (e.g. https://localhost:30800).
+- `concurrency`: The number of concurrenct workers, default is 8.
 - `request-merge-policy`: Currently only supporting <u>random-robin</u> policy.
-- `message-queue-impl`: Implementation of the queueing system. Options are <u>gcp-pubsub</u> for GCP PubSub and  <u>redis-pubsub</u> for ephemeral Redis-based implementation.
+- `message-queue-impl`: Implementation of the queueing system. Options are <u>gcp-pubsub</u> for GCP PubSub <u>redis-sortedset</u> for Redis Sorted Set (persisted and sorted) and  <u>redis-pubsub</u> for ephemeral Redis-based implementation.
 
 <i>additional parameters may be specified for concrete message queue implementations</i>
 
@@ -112,7 +114,6 @@ Currently the only policy supported is `Random Robin Policy` which randomly pick
 
 When a message processing has failed, either shedded or due to a server-side error, it will be scheduled for a retry (assuming the deadline has not passed).
 
-The async processor supports exponential-backoff and fixed-rate backoff (TBD).
 
 ## Results
 
@@ -129,7 +130,27 @@ Results will be written to the results queue and will have the following structu
 
 ## Implementations
 
-### Redis Channels
+### Redis Sorted Set (Persisted)
+
+A persisted implementation based on Redis SortedSets.
+
+![Async Processor - Redis Sorted Set architecture](/docs/images/redis_sortedset_architecture.png "AP - Redis SortedSet")
+
+
+#### Redis Sorted Set Command line parameters
+- `redis.ss.addr`: Address of the Redis server. Default is <u>localhost:6379</u>.
+- `redis.ss.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutally exclusive with redis.queues-config-file flag.")
+- `redis.ss.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty).  <br> Mutally exclusive with `redis.ss.queues-config-file` flag.
+- `redis.ss.request-queue-name`: The name of the sorted-set for the requests. Default is <u>request-sortedset</u>.  <br> Mutally exclusive with `redis.ss.queues-config-file` flag.
+- `redis.ss.result-queue-name`: The name of the list for the results. Default is <u>result-list</u>.
+- `redis.ss.queues-config-file`: The configuration file name when using multiple queues. <br> Mutally exclusive with `redis.ss.request-queue-name`, `redis.ss.request-path-url` and `redis.ss.inference-objective` flags.
+- `redis.ss.poll-interval-ms`: Poll interval in milliseconds. Default is <u>1000</u>.
+- `redis.ss.batch-size`: Number of messages to process per poll. Default is <u>10</u>.
+
+### Redis Channels (Ephemeral)
+
+<u>NOTE:</u> Consider using the [Redis Sorted Set](#redis-sorted-set-persisted) implementation for production use.
+As it is offers persistence and priority sorting.
 
 An example implementation based on Redis channels is provided.
 
@@ -140,8 +161,9 @@ An example implementation based on Redis channels is provided.
 
 ![Async Processor - Redis architecture](/docs/images/redis_pubsub_architecture.png "AP - Redis")
 
-#### Redis Command line parameters
+#### Redis Channels Command line parameters
 
+- `redis.addr`: Address of the Redis server. Default is <u>localhost:6379</u>.
 - `redis.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutally exclusive with redis.queues-config-file flag.")
 - `redis.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty).  <br> Mutally exclusive with `redis.queues-config-file` flag.
 - `redis.request-queue-name`: The name of the channel for the requests. Default is <u>request-queue</u>.  <br> Mutally exclusive with `redis.queues-config-file` flag.
