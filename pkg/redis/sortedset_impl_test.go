@@ -32,7 +32,7 @@ func setupTest(t *testing.T) (*miniredis.Miniredis, *redis.Client, context.Conte
 func TestSortedSetFlow_MessageProcessing(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "test-queue"
@@ -79,7 +79,7 @@ func TestSortedSetFlow_MessageProcessing(t *testing.T) {
 func TestSortedSetFlow_DeadlineOrdering(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "priority-queue"
@@ -130,7 +130,7 @@ func TestSortedSetFlow_DeadlineOrdering(t *testing.T) {
 func TestSortedSetFlow_ExpiredMessages(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "expired-queue"
@@ -168,7 +168,7 @@ func TestSortedSetFlow_ExpiredMessages(t *testing.T) {
 func TestSortedSetFlow_MalformedMessages(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "malformed-queue"
@@ -217,7 +217,7 @@ func TestSortedSetFlow_MalformedMessages(t *testing.T) {
 func TestSortedSetFlow_RetryBackoff(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "retry-queue"
@@ -260,7 +260,7 @@ func TestSortedSetFlow_RetryBackoff(t *testing.T) {
 func TestSortedSetFlow_ResultFIFO(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "result-queue"
@@ -298,7 +298,7 @@ func TestSortedSetFlow_ResultFIFO(t *testing.T) {
 func TestSortedSetFlow_NoRaceCondition(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "race-queue"
@@ -356,7 +356,7 @@ func TestSortedSetFlow_NoRaceCondition(t *testing.T) {
 func TestSortedSetFlow_ContextCancellation(t *testing.T) {
 	s, rdb, ctx, _ := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 
 	queue := "cancel-queue"
 	flow := &RedisSortedSetFlow{
@@ -391,7 +391,7 @@ func TestSortedSetFlow_ContextCancellation(t *testing.T) {
 func TestSortedSetFlow_Integration(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "integration-queue"
@@ -424,7 +424,7 @@ func TestSortedSetFlow_Integration(t *testing.T) {
 func TestSortedSetFlow_ZeroBudget(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "zero-budget-queue"
