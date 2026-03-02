@@ -103,7 +103,7 @@ func main() {
 			return 1.0 // Full capacity
 		})
 	default:
-		setupLog.Error(nil, "Unknown dispatch gate type", "dispatch-gate", dispatchGateType)
+		setupLog.Error(fmt.Errorf("unknown dispatch gate type: %s", dispatchGateType), "Unknown dispatch gate type", "dispatch-gate", dispatchGateType)
 		os.Exit(1)
 	}
 
@@ -112,7 +112,8 @@ func main() {
 	case "random-robin":
 		policy = async.NewRandomRobinPolicy()
 	default:
-		setupLog.Error(nil, "Unknown request merge policy", "request-merge-policy", requestMergePolicy)
+		setupLog.Error(fmt.Errorf("unknown request merge policy: %s", requestMergePolicy), "Unknown request merge policy", "request-merge-policy",
+			requestMergePolicy)
 		os.Exit(1)
 	}
 
@@ -128,7 +129,9 @@ func main() {
 	case "gcp-pubsub":
 		impl = pubsub.NewGCPPubSubMQFlow()
 	default:
-		setupLog.Error(nil, "Unknown message queue implementation", "message-queue-impl", messageQueueImpl)
+
+		setupLog.Error(fmt.Errorf("Unknown message queue implementation: %s", messageQueueImpl), "Unknown message queue implementation",
+			"message-queue-impl", messageQueueImpl)
 		os.Exit(1)
 	}
 

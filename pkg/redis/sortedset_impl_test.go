@@ -3,8 +3,10 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -428,9 +430,11 @@ func TestSortedSetFlow_ZeroBudget(t *testing.T) {
 	queue := "zero-budget-queue"
 
 	// Create a gate with zero budget initially
-	budgetValue := 0.0
+	var budgetValue atomic.Uint64 // Store as bits to represent float64
+
+	budgetValue.Store(math.Float64bits(0.0))
 	gate := flowcontrol.DispatchGateFunc(func(ctx context.Context) float64 {
-		return budgetValue
+		return math.Float64frombits(budgetValue.Load())
 	})
 
 	flow := &RedisSortedSetFlow{
@@ -470,7 +474,7 @@ func TestSortedSetFlow_ZeroBudget(t *testing.T) {
 	}
 
 	// Increase budget to full capacity
-	budgetValue = 1.0
+	budgetValue.Store(math.Float64bits(1.0))
 
 	// Message should now be pulled
 	select {
