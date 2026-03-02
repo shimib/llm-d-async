@@ -33,7 +33,7 @@ func TestRetryMessage_deadlinePassed(t *testing.T) {
 	}
 	result := <-resultChannel
 	var resultMap map[string]any
-	json.Unmarshal([]byte(result.Payload), &resultMap)
+	json.Unmarshal([]byte(result.Payload), &resultMap) // nolint:errcheck
 	if resultMap["error"] != "deadline exceeded" {
 		t.Errorf("Expected error to be: 'deadline exceeded', got: %s", resultMap["error"])
 	}

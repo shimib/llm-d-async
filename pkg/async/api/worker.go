@@ -59,7 +59,7 @@ func Worker(ctx context.Context, characteristics Characteristics, igwBaseURL str
 					resultChannel <- CreateErrorResultMessage(msg.RequestMessage, fmt.Sprintf("Failed to send request to inference: %s", err.Error()))
 					return
 				}
-				defer result.Body.Close()
+				defer result.Body.Close() // nolint:errcheck
 				// Retrying on too many requests or any server-side error.
 				if result.StatusCode == 429 || result.StatusCode >= 500 && result.StatusCode < 600 {
 					if result.StatusCode == 429 {

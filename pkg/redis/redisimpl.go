@@ -147,7 +147,7 @@ func resultWorker(ctx context.Context, rdb *redis.Client, resultChannel chan api
 func requestWorker(ctx context.Context, rdb *redis.Client, msgChannel chan api.RequestMessage, queueName string) {
 	logger := log.FromContext(ctx)
 	sub := rdb.Subscribe(ctx, queueName)
-	defer sub.Close()
+	defer sub.Close() // nolint:errcheck
 
 	ch := sub.Channel()
 	for {

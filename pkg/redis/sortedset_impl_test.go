@@ -287,8 +287,8 @@ func TestSortedSetFlow_ResultFIFO(t *testing.T) {
 	second, _ := rdb.RPop(ctx, queue).Result()
 
 	var msg1, msg2 api.ResultMessage
-	json.Unmarshal([]byte(first), &msg1)
-	json.Unmarshal([]byte(second), &msg2)
+	json.Unmarshal([]byte(first), &msg1)  // nolint:errcheck
+	json.Unmarshal([]byte(second), &msg2) // nolint:errcheck
 
 	if msg1.Id != "first" || msg2.Id != "second" {
 		t.Errorf("FIFO order broken: got %s, %s", msg1.Id, msg2.Id)
@@ -490,7 +490,7 @@ func TestSortedSetFlow_ZeroBudget(t *testing.T) {
 func TestSortedSetFlow_PartialBudget(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "partial-budget-queue"
@@ -537,7 +537,7 @@ func TestSortedSetFlow_PartialBudget(t *testing.T) {
 func TestSortedSetFlow_WithDispatchGateOption(t *testing.T) {
 	s, rdb, ctx, cancel := setupTest(t)
 	defer s.Close()
-	defer rdb.Close()
+	defer rdb.Close() // nolint:errcheck
 	defer cancel()
 
 	queue := "option-test-queue"

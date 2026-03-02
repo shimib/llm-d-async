@@ -130,7 +130,7 @@ func main() {
 		impl = pubsub.NewGCPPubSubMQFlow()
 	default:
 
-		setupLog.Error(fmt.Errorf("Unknown message queue implementation: %s", messageQueueImpl), "Unknown message queue implementation",
+		setupLog.Error(fmt.Errorf("unknown message queue implementation: %s", messageQueueImpl), "Unknown message queue implementation",
 			"message-queue-impl", messageQueueImpl)
 		os.Exit(1)
 	}
