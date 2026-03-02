@@ -49,7 +49,7 @@ func main() {
 	flag.StringVar(&igwBaseURL, "igw-base-url", "", "Base URL of the IGW (e.g. https://localhost:30800)")
 	flag.StringVar(&requestMergePolicy, "request-merge-policy", "random-robin", "The request merge policy to use. Supported policies: random-robin")
 	flag.StringVar(&dispatchGateType, "dispatch-gate", "noop", "The dispatch gate policy to use. Supported policies: noop")
-	flag.StringVar(&messageQueueImpl, "message-queue-impl", "redis-pubsub", "The message queue implementation to use. Supported implementations: redis-pubsub, redis-sortedset, redis-sortedset-gated, gcp-pubsub")
+	flag.StringVar(&messageQueueImpl, "message-queue-impl", "redis-pubsub", "The message queue implementation to use. Supported implementations: redis-pubsub, redis-sortedset, redis-sortedset-gated, gcp-pubsub, gcp-pubsub-gated")
 
 	opts := zap.Options{
 		Development: true,
@@ -128,6 +128,8 @@ func main() {
 		setupLog.Info("Using Redis sorted-set flow with dispatch gating", "gate-type", dispatchGateType)
 	case "gcp-pubsub":
 		impl = pubsub.NewGCPPubSubMQFlow()
+	case "gcp-pubsub-gated":
+		impl = pubsub.NewGCPPubSubMQFlow(pubsub.WithDispatchGate(gate))
 	default:
 
 		setupLog.Error(fmt.Errorf("unknown message queue implementation: %s", messageQueueImpl), "Unknown message queue implementation",

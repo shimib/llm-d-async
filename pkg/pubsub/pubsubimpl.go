@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"sync"
+	"time"
 
 	"cloud.google.com/go/pubsub/v2"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
+	"github.com/llm-d-incubation/llm-d-async/pkg/async/inference/flowcontrol"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
@@ -27,6 +30,7 @@ var (
 	requestSubscriberID = flag.String("pubsub.request-subscriber-id", "", "GCP PubSub request topic subscriber ID. Mutally exclusive with pubsub.topics-config-file flag.")
 	resultTopicID       = flag.String("pubsub.result-topic-id", "", "GCP PubSub topic ID for results")
 	topicsConfigFile    = flag.String("pubsub.topics-config-file", "", "Topics Configuration file. Mutally exclusive with pubsub.request-subscriber-id, pubsub.request-path-url and pubsub.inference-objective flags. See documentation about syntax")
+	batchSize           = flag.Int("pubsub.batch-size", 10, "Number of inflight messages")
 
 	resultChannels sync.Map
 )
@@ -41,13 +45,24 @@ type PubSubMQFlow struct {
 	requestChannels []RequestChannelData
 	retryChannel    chan api.RetryMessage
 	resultChannel   chan api.ResultMessage
+	gate            flowcontrol.DispatchGate
 }
 type RequestChannelData struct {
 	requestChannel api.RequestChannel
 	subscriberID   string
 }
 
-func NewGCPPubSubMQFlow() *PubSubMQFlow {
+// PubSubOption is a functional option for configuring PubSubMQFlow
+type PubSubOption func(*PubSubMQFlow)
+
+// WithDispatchGate enables dispatch gating with the provided gate.
+func WithDispatchGate(gate flowcontrol.DispatchGate) PubSubOption {
+	return func(p *PubSubMQFlow) {
+		p.gate = gate
+	}
+}
+
+func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 
 	ctx := context.Background()
 	var err error
@@ -84,12 +99,22 @@ func NewGCPPubSubMQFlow() *PubSubMQFlow {
 		})
 	}
 
-	return &PubSubMQFlow{
+	p := &PubSubMQFlow{
 		resultTopicID:   *resultTopicID,
 		requestChannels: channels,
 		retryChannel:    make(chan api.RetryMessage),
 		resultChannel:   make(chan api.ResultMessage),
 	}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	if p.gate == nil {
+		p.gate = flowcontrol.DispatchGateFunc(func(ctx context.Context) float64 { return 1.0 })
+	}
+
+	return p
 }
 
 func (r *PubSubMQFlow) RetryChannel() chan api.RetryMessage {
@@ -117,7 +142,7 @@ func (r *PubSubMQFlow) RequestChannels() []api.RequestChannel {
 
 func (r *PubSubMQFlow) Start(ctx context.Context) {
 	for _, channelData := range r.requestChannels {
-		go requestWorker(ctx, pubSubClient, channelData.subscriberID, channelData.requestChannel.Channel)
+		go r.requestWorker(ctx, pubSubClient, channelData.subscriberID, channelData.requestChannel.Channel)
 	}
 	publisher := pubSubClient.Publisher(r.resultTopicID)
 	go resultWorker(ctx, publisher, r.resultChannel)
@@ -179,46 +204,76 @@ func addMsgToRetryQueue(ctx context.Context, retryChannel chan api.RetryMessage)
 
 }
 
-func requestWorker(ctx context.Context, pubSubClient *pubsub.Client, subscriberID string, ch chan api.RequestMessage) {
+func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.Client, subscriberID string, ch chan api.RequestMessage) {
 	logger := log.FromContext(ctx)
 
 	sub := pubSubClient.Subscriber(subscriberID)
 
-	err := sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
-		deliveryAttempt := msg.DeliveryAttempt
+	for {
+		receiveCtx, cancel := context.WithCancel(ctx)
+		budget := r.gate.Budget(ctx)
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
 
-		var msgObj api.RequestMessage
-		err := json.Unmarshal(msg.Data, &msgObj)
+			for {
+				select {
+				case <-ticker.C:
+					if r.gate.Budget(ctx) != budget {
+						cancel() // Trigger restart with different limit
+						return
+					}
+				case <-receiveCtx.Done():
+					return
+				}
+			}
+		}()
+
+		currBatchSize := int(math.Floor(float64(*batchSize) * budget))
+		logger.V(logutil.DEFAULT).Info("PubSub MaxOutstandingMessages", "value", currBatchSize)
+		sub.ReceiveSettings.MaxOutstandingMessages = currBatchSize
+		sub.ReceiveSettings.NumGoroutines = 1
+		if currBatchSize == 0 {
+			<-receiveCtx.Done()
+			continue
+		}
+		err := sub.Receive(receiveCtx, func(ctx context.Context, msg *pubsub.Message) {
+
+			deliveryAttempt := msg.DeliveryAttempt
+
+			var msgObj api.RequestMessage
+			err := json.Unmarshal(msg.Data, &msgObj)
+			if err != nil {
+				logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal message from request queue")
+				msg.Ack()
+				return
+			}
+
+			resultsChannel := make(chan bool, 1)
+			resultChannels.Store(msg.ID, resultsChannel)
+			defer resultChannels.Delete(msgObj.Id)
+
+			if msgObj.Metadata == nil {
+				msgObj.Metadata = make(map[string]string)
+			}
+			msgObj.Metadata[PUBSUB_ID] = msg.ID
+			if deliveryAttempt != nil {
+				msgObj.RetryCount = *deliveryAttempt - 1
+			}
+
+			ch <- msgObj
+
+			result := <-resultsChannel
+			if !result {
+				msg.Nack()
+			} else {
+				msg.Ack()
+			}
+		})
+		// TODO
 		if err != nil {
-			logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal message from request queue")
-			msg.Ack()
-			return
+			logger.V(logutil.DEFAULT).Error(err, "Fail to receive messages from request subscription")
 		}
-
-		resultsChannel := make(chan bool, 1)
-		resultChannels.Store(msg.ID, resultsChannel)
-		defer resultChannels.Delete(msgObj.Id)
-
-		if msgObj.Metadata == nil {
-			msgObj.Metadata = make(map[string]string)
-		}
-		msgObj.Metadata[PUBSUB_ID] = msg.ID
-		if deliveryAttempt != nil {
-			msgObj.RetryCount = *deliveryAttempt - 1
-		}
-
-		ch <- msgObj
-
-		result := <-resultsChannel
-		if !result {
-			msg.Nack()
-		} else {
-			msg.Ack()
-		}
-	})
-	// TODO
-	if err != nil {
-		logger.V(logutil.DEFAULT).Error(err, "Fail to receive messages from request subscription")
 	}
 
 }
