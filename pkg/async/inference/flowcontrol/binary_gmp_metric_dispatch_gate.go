@@ -67,9 +67,6 @@ func NewBinaryGMPMetricDispatchGate(projectID string, query string) *BinaryGMPMe
 	}
 	v1api := v1.NewAPI(client)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	// 2. Define your PromQL query.
 	// Replace "my_custom_metric" with the actual metric your PodMonitoring is scraping.
 
