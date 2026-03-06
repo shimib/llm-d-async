@@ -15,7 +15,7 @@ jobs:
       has_code_changes: ${{ steps.filter.outputs.code }}
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check for code changes
         uses: dorny/paths-filter@v3
@@ -35,13 +35,13 @@ jobs:
     if: needs.check-code-changes.outputs.has_code_changes == 'true'
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Extract Go version from go.mod
         run: sed -En 's/^go (.*)$/GO_VERSION=\1/p' go.mod >> $GITHUB_ENV
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "${{ env.GO_VERSION }}"
           cache-dependency-path: ./go.sum
@@ -49,11 +49,8 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.8.0
-          args: ""
+      - name: Lint
+        run: make lint
 
       - name: Build
         run: make build
@@ -68,7 +65,7 @@ jobs:
     if: needs.check-code-changes.outputs.has_code_changes == 'true'
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check for Python files
         id: check-python
@@ -81,7 +78,7 @@ jobs:
 
       - name: Set up Python
         if: steps.check-python.outputs.has_python == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -104,7 +101,7 @@ jobs:
     if: needs.check-code-changes.outputs.has_code_changes == 'true'
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

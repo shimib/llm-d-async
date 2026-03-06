@@ -123,19 +123,16 @@ undeploy-ap-on-k8s:
 	export KIND=$(KIND) KUBECTL=$(KUBECTL) ENVIRONMENT=kubernetes && \
 		ENVIRONMENT=kubernetes DEPLOY_LLM_D=$(DEPLOY_LLM_D)  deploy/install.sh --undeploy
 
-# E2E tests on Kind cluster for saturation-based autoscaling
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
+# E2E tests for Redis sorted set message flow
+E2E_IMG ?= $(IMAGE_TAG_BASE)/async-processor:e2e-test
+IGW_MOCK_IMG ?= e2e-igw-mock:latest
+
 .PHONY: test-e2e
-test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	@command -v $(KIND) >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
-		exit 1; \
-	}
-	$(eval FOCUS_ARGS := $(if $(FOCUS),-ginkgo.focus="$(FOCUS)",-ginkgo.focus="Saturation Mode"))
-	$(eval SKIP_ARGS := $(if $(SKIP),-ginkgo.skip="$(SKIP)",))
-	export COLLECTOR_V2=1 KUBECONFIG=$(KUBECONFIG) K8S_EXPECTED_VERSION=$(K8S_VERSION) && go test ./test/e2e-saturation-based/ -timeout 30m -v -ginkgo.v $(FOCUS_ARGS) $(SKIP_ARGS)
+test-e2e: ## Run e2e tests against a Kind cluster
+	@command -v kind >/dev/null 2>&1 || { echo "kind is not installed"; exit 1; }
+	AP_IMAGE=$(E2E_IMG) go test ./test/e2e/ -timeout 30m -v -ginkgo.v \
+		$(if $(FOCUS),-ginkgo.focus="$(FOCUS)",) \
+		$(if $(SKIP),-ginkgo.skip="$(SKIP)",)
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -231,7 +228,7 @@ CONTROLLER_TOOLS_VERSION ?= v0.17.2
 ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
-GOLANGCI_LINT_VERSION ?= v1.63.4
+GOLANGCI_LINT_VERSION ?= v2.8.0
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -257,6 +254,14 @@ $(ENVTEST): $(LOCALBIN)
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
+GINKGO ?= $(LOCALBIN)/ginkgo
+GINKGO_VERSION ?= v2.28.1
+
+.PHONY: ginkgo
+ginkgo: $(GINKGO) ## Download ginkgo locally if necessary.
+$(GINKGO): $(LOCALBIN)
+	$(call go-install-tool,$(GINKGO),github.com/onsi/ginkgo/v2/ginkgo,$(GINKGO_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
