@@ -9,10 +9,10 @@ require (
 	github.com/alicebob/miniredis/v2 v2.36.1
 	github.com/go-logr/logr v1.4.3
 	github.com/prometheus/client_golang v1.23.2
-	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/common v0.67.5
 	github.com/redis/go-redis/v9 v9.18.0
 	go.uber.org/zap v1.27.1
+	golang.org/x/oauth2 v0.34.0
 	k8s.io/client-go v0.34.5
 	sigs.k8s.io/controller-runtime v0.22.5
 	sigs.k8s.io/gateway-api-inference-extension v1.2.1
@@ -60,6 +60,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/procfs v0.17.0 // indirect
 	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
@@ -84,7 +85,6 @@ require (
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20250808145144-a408d31f581a // indirect
 	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/term v0.38.0 // indirect

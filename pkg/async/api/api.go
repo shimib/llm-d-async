@@ -20,7 +20,8 @@ type Flow interface {
 }
 
 type Characteristics struct {
-	HasExternalBackoff bool
+	HasExternalBackoff     bool
+	SupportsMessageLatency bool
 }
 
 type RequestMergePolicy interface {

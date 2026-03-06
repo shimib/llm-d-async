@@ -176,7 +176,8 @@ func requestWorker(ctx context.Context, rdb *redis.Client, msgChannel chan api.R
 
 func (r *RedisMQFlow) Characteristics() api.Characteristics {
 	return api.Characteristics{
-		HasExternalBackoff: false,
+		HasExternalBackoff:     false,
+		SupportsMessageLatency: false,
 	}
 }
 

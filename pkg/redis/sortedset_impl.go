@@ -145,7 +145,7 @@ func (r *RedisSortedSetFlow) ResultChannel() chan api.ResultMessage {
 }
 
 func (r *RedisSortedSetFlow) Characteristics() api.Characteristics {
-	return api.Characteristics{HasExternalBackoff: false}
+	return api.Characteristics{HasExternalBackoff: false, SupportsMessageLatency: false}
 }
 
 // Polls sorted set and processes messages by deadline priority (earliest first)

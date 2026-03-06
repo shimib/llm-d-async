@@ -38,13 +38,22 @@ var (
 		Subsystem: SchedulerSubsystem, Name: "async_shedded_requests_total",
 		Help: "Total number of async requests that were shedded.",
 	})
+	MessageLatencyTime = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Subsystem: SchedulerSubsystem, Name: "async_message_latency_time_millis",
+		Help:    "Time from message publish to message being succefully processed.",
+		Buckets: []float64{100, 1000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000},
+	})
 )
 
 // GetCollectors returns all custom collectors for the async processor.
-func GetAsyncProcessorCollectors() []prometheus.Collector {
-	return []prometheus.Collector{
+func GetAsyncProcessorCollectors(supportsMessageLatency bool) []prometheus.Collector {
+	collectors := []prometheus.Collector{
 		Retries, AsyncReqs, ExceededDeadlineReqs, FailedReqs, SuccessfulReqs, SheddedRequests,
 	}
+	if supportsMessageLatency {
+		collectors = append(collectors, MessageLatencyTime)
+	}
+	return collectors
 }
 
 var registerMetrics sync.Once

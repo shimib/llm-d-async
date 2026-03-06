@@ -13,6 +13,7 @@ import (
 	"cloud.google.com/go/pubsub/v2"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/inference/flowcontrol"
+	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
@@ -127,7 +128,8 @@ func (r *PubSubMQFlow) ResultChannel() chan api.ResultMessage {
 
 func (r *PubSubMQFlow) Characteristics() api.Characteristics {
 	return api.Characteristics{
-		HasExternalBackoff: true,
+		HasExternalBackoff:     true,
+		SupportsMessageLatency: true,
 	}
 }
 
@@ -267,6 +269,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 			if !result {
 				msg.Nack()
 			} else {
+				metrics.MessageLatencyTime.Observe(float64(time.Since(msg.PublishTime).Milliseconds()))
 				msg.Ack()
 			}
 		})

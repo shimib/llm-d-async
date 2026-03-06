@@ -74,8 +74,51 @@ func main() {
 	////////setupLog.Info("GIE build", "commit-sha", version.CommitSHA, "build-ref", version.BuildRef)
 
 	printAllFlags(setupLog)
+	// Create dispatch gate
+	var gate flowcontrol.DispatchGate
+	switch dispatchGateType {
+	case "noop":
+		gate = flowcontrol.DispatchGateFunc(func(ctx context.Context) float64 {
+			return 1.0 // Full capacity
+		})
+	case "gmp-avg-queue-size":
+		gate = flowcontrol.AverageQueueSizeGMPGate(gmpProjectID, gmpModelName)
+	default:
+		setupLog.Error(fmt.Errorf("unknown dispatch gate type: %s", dispatchGateType), "Unknown dispatch gate type", "dispatch-gate", dispatchGateType)
+		os.Exit(1)
+	}
 
-	metrics.Register(metrics.GetAsyncProcessorCollectors()...)
+	var policy api.RequestMergePolicy
+	switch requestMergePolicy {
+	case "random-robin":
+		policy = async.NewRandomRobinPolicy()
+	default:
+		setupLog.Error(fmt.Errorf("unknown request merge policy: %s", requestMergePolicy), "Unknown request merge policy", "request-merge-policy",
+			requestMergePolicy)
+		os.Exit(1)
+	}
+	var impl api.Flow
+	switch messageQueueImpl {
+	case "redis-pubsub":
+		impl = redis.NewRedisMQFlow()
+	case "redis-sortedset":
+		impl = redis.NewRedisSortedSetFlow()
+	case "redis-sortedset-gated":
+		impl = redis.NewRedisSortedSetFlow(redis.WithDispatchGate(gate))
+		setupLog.Info("Using Redis sorted-set flow with dispatch gating", "gate-type", dispatchGateType)
+	case "gcp-pubsub":
+		impl = pubsub.NewGCPPubSubMQFlow()
+	case "gcp-pubsub-gated":
+		impl = pubsub.NewGCPPubSubMQFlow(pubsub.WithDispatchGate(gate))
+		setupLog.Info("Using GCP PubSub flow with dispatch gating", "gate-type", dispatchGateType)
+	default:
+
+		setupLog.Error(fmt.Errorf("unknown message queue implementation: %s", messageQueueImpl), "Unknown message queue implementation",
+			"message-queue-impl", messageQueueImpl)
+		os.Exit(1)
+	}
+
+	metrics.Register(metrics.GetAsyncProcessorCollectors(impl.Characteristics().SupportsMessageLatency)...)
 
 	ctx := ctrl.SetupSignalHandler()
 
@@ -101,50 +144,6 @@ func main() {
 	go msrv.Start(ctx) // nolint:errcheck
 
 	/////
-
-	// Create dispatch gate
-	var gate flowcontrol.DispatchGate
-	switch dispatchGateType {
-	case "noop":
-		gate = flowcontrol.DispatchGateFunc(func(ctx context.Context) float64 {
-			return 1.0 // Full capacity
-		})
-	case "gmp-avg-queue-size":
-		gate = flowcontrol.AverageQueueSizeGMPGate(gmpProjectID, gmpModelName)
-	default:
-		setupLog.Error(fmt.Errorf("unknown dispatch gate type: %s", dispatchGateType), "Unknown dispatch gate type", "dispatch-gate", dispatchGateType)
-		os.Exit(1)
-	}
-
-	var policy api.RequestMergePolicy
-	switch requestMergePolicy {
-	case "random-robin":
-		policy = async.NewRandomRobinPolicy()
-	default:
-		setupLog.Error(fmt.Errorf("unknown request merge policy: %s", requestMergePolicy), "Unknown request merge policy", "request-merge-policy",
-			requestMergePolicy)
-		os.Exit(1)
-	}
-
-	var impl api.Flow
-	switch messageQueueImpl {
-	case "redis-pubsub":
-		impl = redis.NewRedisMQFlow()
-	case "redis-sortedset":
-		impl = redis.NewRedisSortedSetFlow()
-	case "redis-sortedset-gated":
-		impl = redis.NewRedisSortedSetFlow(redis.WithDispatchGate(gate))
-		setupLog.Info("Using Redis sorted-set flow with dispatch gating", "gate-type", dispatchGateType)
-	case "gcp-pubsub":
-		impl = pubsub.NewGCPPubSubMQFlow()
-	case "gcp-pubsub-gated":
-		impl = pubsub.NewGCPPubSubMQFlow(pubsub.WithDispatchGate(gate))
-	default:
-
-		setupLog.Error(fmt.Errorf("unknown message queue implementation: %s", messageQueueImpl), "Unknown message queue implementation",
-			"message-queue-impl", messageQueueImpl)
-		os.Exit(1)
-	}
 
 	igwBaseURL = util.NormalizeBaseURL(igwBaseURL)
 
