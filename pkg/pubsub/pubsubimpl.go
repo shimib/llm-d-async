@@ -24,8 +24,7 @@ const PUBSUB_ID = "pubsub-id"
 var pubSubClient *pubsub.Client
 
 var (
-	projectID = flag.String("pubsub.project-id", "", "GCP project ID for PubSub")
-
+	projectID           = flag.String("pubsub.project-id", "", "GCP project ID for PubSub")
 	requestPathURL      = flag.String("pubsub.request-path-url", "/v1/completions", "inference request path url. Mutally exclusive with pubsub.topics-config-file flag.")
 	inferenceObjective  = flag.String("pubsub.inference-objective", "", "inference objective to use in requests. Mutally exclusive with pubsub.topics-config-file flag.")
 	requestSubscriberID = flag.String("pubsub.request-subscriber-id", "", "GCP PubSub request topic subscriber ID. Mutally exclusive with pubsub.topics-config-file flag.")

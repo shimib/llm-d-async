@@ -39,9 +39,6 @@ func main() {
 
 	var igwBaseURL string
 
-	var gmpProjectID string
-	var gmpModelName string
-
 	flag.IntVar(&loggerVerbosity, "v", logging.DEFAULT, "number for the log level verbosity")
 
 	flag.IntVar(&metricsPort, "metrics-port", 9090, "The metrics port")
@@ -51,12 +48,8 @@ func main() {
 
 	flag.StringVar(&igwBaseURL, "igw-base-url", "", "Base URL of the IGW (e.g. https://localhost:30800)")
 	flag.StringVar(&requestMergePolicy, "request-merge-policy", "random-robin", "The request merge policy to use. Supported policies: random-robin")
-	flag.StringVar(&dispatchGateType, "dispatch-gate", "noop", "The dispatch gate policy to use. Supported policies: noop, redis, gmp-avg-queue-size")
+	flag.StringVar(&dispatchGateType, "dispatch-gate", "noop", "The dispatch gate policy to use. Supported policies: noop, redis, metric-avg-queue-size")
 	flag.StringVar(&messageQueueImpl, "message-queue-impl", "redis-pubsub", "The message queue implementation to use. Supported implementations: redis-pubsub, redis-sortedset, redis-sortedset-gated, gcp-pubsub, gcp-pubsub-gated")
-
-	// TODO: refactor most of configuration to config files and not cmd line flags
-	flag.StringVar(&gmpProjectID, "gmp.gate.project-id", "", "Project ID for Google Managed Prometheus")
-	flag.StringVar(&gmpModelName, "gmp.model-name", "", "metrics name to use for avg_queue_size")
 
 	opts := zap.Options{
 		Development: true,
@@ -84,8 +77,8 @@ func main() {
 	case "redis":
 		gate = redis.NewRedisDispatchGate()
 		setupLog.Info("Using Redis-based dispatch gate")
-	case "gmp-avg-queue-size":
-		gate = flowcontrol.AverageQueueSizeGMPGate(gmpProjectID, gmpModelName)
+	case "metric-avg-queue-size":
+		gate = flowcontrol.AverageQueueSizeGate()
 	default:
 		setupLog.Error(fmt.Errorf("unknown dispatch gate type: %s", dispatchGateType), "Unknown dispatch gate type", "dispatch-gate", dispatchGateType)
 		os.Exit(1)

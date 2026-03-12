@@ -80,6 +80,10 @@ make deploy-ap-on-k8s
 - `concurrency`: The number of concurrenct workers, default is 8.
 - `request-merge-policy`: Currently only supporting <u>random-robin</u> policy.
 - `message-queue-impl`: Implementation of the queueing system. Options are <u>gcp-pubsub</u> for GCP PubSub <u>redis-sortedset</u> for Redis Sorted Set (persisted and sorted) and  <u>redis-pubsub</u> for ephemeral Redis-based implementation.
+- `dispatch-gate`: Implementation of a dispatcher that is responsible for gating pulling messages from the queues. Options are :
+   - `noop`: The default. Respresents full availability of the system. Always pulling messages.
+   - `metric-avg-queue-size`: Availability base on the model average queue size metric in Prometheus. If the queue size is non empty, messages will not be pulled from the respective queue.
+   - `redis`: Availability of the system is pulled periodically from Redis (I.e., managed by external system).
 
 <i>additional parameters may be specified for concrete message queue implementations</i>
 

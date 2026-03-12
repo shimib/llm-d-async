@@ -18,48 +18,41 @@ package flowcontrol
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
+	"golang.org/x/oauth2/google"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
-
-	"golang.org/x/oauth2/google"
 )
 
-// BinaryGMPMetricDispatchGate implements DispatchGate based on a GMP (Google Managed Prometheus) Collector.
+var isGMP = flag.Bool("gate.pmetric.is-gmp", false, "Is this GMP (Google Managed Prometheus).")
+var prometheusURL = flag.String("gate.prometheus.url", "", "Prometheus URL for non GMP metric")
+var gmpProjectID = flag.String("gate.pmetric.gmp.project-id", "", "Project ID for Google Managed Prometheus")
+var prometheusQueryModelName = flag.String("gate.prometheus.model-name", "", "metrics name to use for avg_queue_size")
+
+//
+
+// BinaryMetricDispatchGate implements DispatchGate supporting GMP (Google Managed Prometheus) Collector or general Prometheus collector.
 // It returns 0.0 (no capacity) if the metric value is non-zero,
 // and 1.0 (full capacity) if the metric value is zero.
-type BinaryGMPMetricDispatchGate struct {
+type BinaryMetricDispatchGate struct {
 	v1api v1.API
 	query string
 }
 
-// NewBinaryNumericMetricDispatchGate creates a new gate based on the provided Prometheus metric.
-func NewBinaryGMPMetricDispatchGate(projectID string, query string) *BinaryGMPMetricDispatchGate {
+// NewBinaryMetricDispatchGate creates a new gate based on the provided Prometheus metric.
+func NewBinaryMetricDispatchGate(clientConfig api.Config, query string) *BinaryMetricDispatchGate {
 
 	ctx := context.Background()
 	logger := log.FromContext(ctx)
 	// 1. Create the authenticated GCP client
 	// This automatically picks up Application Default Credentials and refreshes the token.
-	gcpClient, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/monitoring.read")
-	if err != nil {
-		logger.Error(err, "Failed to create authenticated GCP client")
-		panic(err)
-	}
 
-	// 2. Configure the Prometheus API Client
-	// Notice we do NOT include /api/v1/query here; the client library appends it automatically.
-	promURL := fmt.Sprintf("https://monitoring.googleapis.com/v1/projects/%s/location/global/prometheus", projectID)
-
-	clientConfig := api.Config{
-		Address: promURL,
-		// Inject the authenticated transport here so every request gets the Bearer token.
-		RoundTripper: gcpClient.Transport,
-	}
 	client, err := api.NewClient(clientConfig)
 	if err != nil {
 		logger.Error(err, "Error creating Prometheus API client")
@@ -70,14 +63,14 @@ func NewBinaryGMPMetricDispatchGate(projectID string, query string) *BinaryGMPMe
 	// 2. Define your PromQL query.
 	// Replace "my_custom_metric" with the actual metric your PodMonitoring is scraping.
 
-	return &BinaryGMPMetricDispatchGate{
+	return &BinaryMetricDispatchGate{
 		v1api: v1api,
 		query: query,
 	}
 }
 
 // Budget implements DispatchGate.
-func (g *BinaryGMPMetricDispatchGate) Budget(ctx context.Context) float64 {
+func (g *BinaryMetricDispatchGate) Budget(ctx context.Context) float64 {
 	logger := log.FromContext(ctx)
 
 	// 3. Execute the query
@@ -115,6 +108,32 @@ func (g *BinaryGMPMetricDispatchGate) Budget(ctx context.Context) float64 {
 	return 1.0
 }
 
-func AverageQueueSizeGMPGate(projectID string, modelName string) *BinaryGMPMetricDispatchGate {
-	return NewBinaryGMPMetricDispatchGate(projectID, `inference_pool_average_queue_size{name="`+modelName+`"}`)
+func AverageQueueSizeGate() *BinaryMetricDispatchGate {
+	ctx := context.Background()
+	logger := log.FromContext(ctx)
+	if *isGMP {
+
+		gcpClient, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/monitoring.read")
+		if err != nil {
+			logger.Error(err, "Failed to create authenticated GCP client")
+			panic(err)
+		}
+
+		// 2. Configure the Prometheus API Client
+		// Notice we do NOT include /api/v1/query here; the client library appends it automatically.
+		promURL := fmt.Sprintf("https://monitoring.googleapis.com/v1/projects/%s/location/global/prometheus", *gmpProjectID)
+
+		clientConfig := api.Config{
+			Address: promURL,
+			// Inject the authenticated transport here so every request gets the Bearer token.
+			RoundTripper: gcpClient.Transport,
+		}
+
+		return NewBinaryMetricDispatchGate(clientConfig, `inference_pool_average_queue_size{name="`+*prometheusQueryModelName+`"}`)
+	} else {
+		clientConfig := api.Config{
+			Address: *prometheusURL,
+		}
+		return NewBinaryMetricDispatchGate(clientConfig, `inference_pool_average_queue_size{name="`+*prometheusQueryModelName+`"}`)
+	}
 }
