@@ -38,7 +38,7 @@ func Worker(ctx context.Context, characteristics Characteristics, igwBaseURL str
 				continue
 			}
 
-			// Using a function object for easy boundries for 'return' and 'defer'!
+			// Using a function object for easy boundaries for 'return' and 'defer'!
 			sendInferenceRequest := func() {
 
 				fullUrl := igwBaseURL + msg.RequestPathURL

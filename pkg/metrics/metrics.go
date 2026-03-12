@@ -40,7 +40,7 @@ var (
 	})
 	MessageLatencyTime = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Subsystem: SchedulerSubsystem, Name: "async_message_latency_time_millis",
-		Help:    "Time from message publish to message being succefully processed.",
+		Help:    "Time from message publish to message being successfully processed.",
 		Buckets: []float64{100, 1000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000},
 	})
 )

@@ -32,7 +32,7 @@ func NewRedisDispatchGate() *RedisDispatchGate {
 }
 
 // Budget reads the dispatch budget from Redis. Returns a value in [0.0, 1.0].
-// Defaults to 1.0 (full capacity) when the key is absent or unparseable.
+// Defaults to 1.0 (full capacity) when the key is absent or unparsable.
 func (g *RedisDispatchGate) Budget(ctx context.Context) float64 {
 	val, err := g.rdb.Get(ctx, g.key).Result()
 	if err == goredis.Nil {

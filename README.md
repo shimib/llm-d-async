@@ -143,11 +143,11 @@ A persisted implementation based on Redis SortedSets.
 
 #### Redis Sorted Set Command line parameters
 - `redis.ss.addr`: Address of the Redis server. Default is <u>localhost:6379</u>.
-- `redis.ss.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutally exclusive with redis.queues-config-file flag.")
-- `redis.ss.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty).  <br> Mutally exclusive with `redis.ss.queues-config-file` flag.
-- `redis.ss.request-queue-name`: The name of the sorted-set for the requests. Default is <u>request-sortedset</u>.  <br> Mutally exclusive with `redis.ss.queues-config-file` flag.
+- `redis.ss.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutually exclusive with redis.queues-config-file flag.")
+- `redis.ss.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty).  <br> Mutually exclusive with `redis.ss.queues-config-file` flag.
+- `redis.ss.request-queue-name`: The name of the sorted-set for the requests. Default is <u>request-sortedset</u>.  <br> Mutually exclusive with `redis.ss.queues-config-file` flag.
 - `redis.ss.result-queue-name`: The name of the list for the results. Default is <u>result-list</u>.
-- `redis.ss.queues-config-file`: The configuration file name when using multiple queues. <br> Mutally exclusive with `redis.ss.request-queue-name`, `redis.ss.request-path-url` and `redis.ss.inference-objective` flags.
+- `redis.ss.queues-config-file`: The configuration file name when using multiple queues. <br> Mutually exclusive with `redis.ss.request-queue-name`, `redis.ss.request-path-url` and `redis.ss.inference-objective` flags.
 - `redis.ss.poll-interval-ms`: Poll interval in milliseconds. Default is <u>1000</u>.
 - `redis.ss.batch-size`: Number of messages to process per poll. Default is <u>10</u>.
 
@@ -168,12 +168,12 @@ An example implementation based on Redis channels is provided.
 #### Redis Channels Command line parameters
 
 - `redis.addr`: Address of the Redis server. Default is <u>localhost:6379</u>.
-- `redis.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutally exclusive with redis.queues-config-file flag.")
-- `redis.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty).  <br> Mutally exclusive with `redis.queues-config-file` flag.
-- `redis.request-queue-name`: The name of the channel for the requests. Default is <u>request-queue</u>.  <br> Mutally exclusive with `redis.queues-config-file` flag.
+- `redis.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutually exclusive with redis.queues-config-file flag.")
+- `redis.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty).  <br> Mutually exclusive with `redis.queues-config-file` flag.
+- `redis.request-queue-name`: The name of the channel for the requests. Default is <u>request-queue</u>.  <br> Mutually exclusive with `redis.queues-config-file` flag.
 - `redis.retry-queue-name`: The name of the channel for the retries. Default is <u>retry-sortedset</u>.
 - `redis.result-queue-name`: The name of the channel for the results. Default is <u>result-queue</u>.
-- `redis.queues-config-file`: The configuration file name when using multiple queues. <br> Mutally exclusive with `redis.request-queue-name`, `redis.request-path-url` and `redis.inference-objective` flags.
+- `redis.queues-config-file`: The configuration file name when using multiple queues. <br> Mutually exclusive with `redis.request-queue-name`, `redis.request-path-url` and `redis.inference-objective` flags.
 
 #### Multiple Queues Configuration File Syntax
 
@@ -209,11 +209,11 @@ The GCP PubSub implementation requires the user to configure the following:
 #### GCP PubSub Command line parameters
 
 - `pubsub.project-id`: The name GCP project ID using the PubSub API.
-- `pubsub.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutally exclusive with pubsub.topics-config-file flag.
-- `pubsub.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty). <br> Mutally exclusive with pubsub.topics-config-file flag.
-- `pubsub.request-subscriber-id`: The subscriber ID for the requests topic.<br> Mutally exclusive with pubsub.topics-config-file flag.
+- `pubsub.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutually exclusive with pubsub.topics-config-file flag.
+- `pubsub.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty). <br> Mutually exclusive with pubsub.topics-config-file flag.
+- `pubsub.request-subscriber-id`: The subscriber ID for the requests topic.<br> Mutually exclusive with pubsub.topics-config-file flag.
 - `pubsub.result-topic-id`: The results topic ID.
-- `pubsub.topics-config-file`: The configuration file name when using multiple topics. <br> Mutally exclusive with `pubsub.request-subscriber-id`, `pubsub.request-path-url` and `pubsub.inference-objective` flags.
+- `pubsub.topics-config-file`: The configuration file name when using multiple topics. <br> Mutually exclusive with `pubsub.request-subscriber-id`, `pubsub.request-path-url` and `pubsub.inference-objective` flags.
 
 #### Multiple Topics Configuration File Syntax
 

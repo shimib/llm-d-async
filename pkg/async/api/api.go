@@ -29,7 +29,7 @@ type RequestMergePolicy interface {
 }
 
 // TODO: Consider per-message metadata map[string]string
-// add enpoint to message level.
+// add endpoint to message level.
 type RequestMessage struct {
 	Id              string            `json:"id"`
 	RetryCount      int               `json:"retry_count,omitempty"` // TODO: Consider

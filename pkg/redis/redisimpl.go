@@ -23,14 +23,14 @@ const QUEUE_NAME_KEY = "queue_name"
 var (
 	redisAddr = flag.String("redis.addr", "localhost:6379", "address of the Redis server")
 
-	requestPathURL     = flag.String("redis.request-path-url", "/v1/completions", "request path url. Mutally exclusive with redis.queues-config-file flag.")
-	inferenceObjective = flag.String("redis.inference-objective", "", "inference objective to use in requests. Mutally exclusive with redis.queues-config-file flag.")
-	requestQueueName   = flag.String("redis.request-queue-name", "request-queue", "name of the Redis channel for request messages. Mutally exclusive with redis.queues-config-file flag.")
+	requestPathURL     = flag.String("redis.request-path-url", "/v1/completions", "request path url. Mutually exclusive with redis.queues-config-file flag.")
+	inferenceObjective = flag.String("redis.inference-objective", "", "inference objective to use in requests. Mutually exclusive with redis.queues-config-file flag.")
+	requestQueueName   = flag.String("redis.request-queue-name", "request-queue", "name of the Redis channel for request messages. Mutually exclusive with redis.queues-config-file flag.")
 
 	retryQueueName  = flag.String("redis.retry-queue-name", "retry-sortedset", "name of the Redis sorted set for retry messages")
 	resultQueueName = flag.String("redis.result-queue-name", "result-queue", "name of the Redis channel for result messages")
 
-	queuesConfigFile = flag.String("redis.queues-config-file", "", "Queues Configuration file. Mutally exclusive with redis.request-queue-name, redis.request-path-url and redis.inference-objective flags. See documentation about syntax")
+	queuesConfigFile = flag.String("redis.queues-config-file", "", "Queues Configuration file. Mutually exclusive with redis.request-queue-name, redis.request-path-url and redis.inference-objective flags. See documentation about syntax")
 )
 
 type QueueConfig struct {

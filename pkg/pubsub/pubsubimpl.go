@@ -25,11 +25,11 @@ var pubSubClient *pubsub.Client
 
 var (
 	projectID           = flag.String("pubsub.project-id", "", "GCP project ID for PubSub")
-	requestPathURL      = flag.String("pubsub.request-path-url", "/v1/completions", "inference request path url. Mutally exclusive with pubsub.topics-config-file flag.")
-	inferenceObjective  = flag.String("pubsub.inference-objective", "", "inference objective to use in requests. Mutally exclusive with pubsub.topics-config-file flag.")
-	requestSubscriberID = flag.String("pubsub.request-subscriber-id", "", "GCP PubSub request topic subscriber ID. Mutally exclusive with pubsub.topics-config-file flag.")
+	requestPathURL      = flag.String("pubsub.request-path-url", "/v1/completions", "inference request path url. Mutually exclusive with pubsub.topics-config-file flag.")
+	inferenceObjective  = flag.String("pubsub.inference-objective", "", "inference objective to use in requests. Mutually exclusive with pubsub.topics-config-file flag.")
+	requestSubscriberID = flag.String("pubsub.request-subscriber-id", "", "GCP PubSub request topic subscriber ID. Mutually exclusive with pubsub.topics-config-file flag.")
 	resultTopicID       = flag.String("pubsub.result-topic-id", "", "GCP PubSub topic ID for results")
-	topicsConfigFile    = flag.String("pubsub.topics-config-file", "", "Topics Configuration file. Mutally exclusive with pubsub.request-subscriber-id, pubsub.request-path-url and pubsub.inference-objective flags. See documentation about syntax")
+	topicsConfigFile    = flag.String("pubsub.topics-config-file", "", "Topics Configuration file. Mutually exclusive with pubsub.request-subscriber-id, pubsub.request-path-url and pubsub.inference-objective flags. See documentation about syntax")
 	batchSize           = flag.Int("pubsub.batch-size", 10, "Number of inflight messages")
 
 	resultChannels sync.Map
