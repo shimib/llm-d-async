@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/onsi/gomega"
@@ -120,6 +121,7 @@ func makeRequestMessage(id string, deadlineOffset time.Duration) api.RequestMess
 	deadline := time.Now().Add(deadlineOffset)
 	return api.RequestMessage{
 		Id:              id,
+		CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
 		DeadlineUnixSec: fmt.Sprintf("%d", deadline.Unix()),
 		Payload:         map[string]any{"model": id, "prompt": "test"},
 	}

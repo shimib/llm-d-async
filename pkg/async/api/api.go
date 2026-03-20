@@ -32,6 +32,7 @@ type RequestMergePolicy interface {
 // add endpoint to message level.
 type RequestMessage struct {
 	Id              string            `json:"id"`
+	CreatedUnixSec  string            `json:"created"`               // Unix seconds
 	RetryCount      int               `json:"retry_count,omitempty"` // TODO: Consider
 	DeadlineUnixSec string            `json:"deadline"`              // TODO: check about using int64, change name to timeout
 	Payload         map[string]any    `json:"payload"`
