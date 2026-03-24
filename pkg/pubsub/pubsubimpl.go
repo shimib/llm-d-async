@@ -24,12 +24,13 @@ const PUBSUB_ID = "pubsub-id"
 var pubSubClient *pubsub.Client
 
 var (
+	igwBaseURL          = flag.String("pubsub.igw-base-url", "", "Base URL for IGW. Mutually exclusive with pubsub.topics-config-file flag.")
 	projectID           = flag.String("pubsub.project-id", "", "GCP project ID for PubSub")
 	requestPathURL      = flag.String("pubsub.request-path-url", "/v1/completions", "inference request path url. Mutually exclusive with pubsub.topics-config-file flag.")
 	inferenceObjective  = flag.String("pubsub.inference-objective", "", "inference objective to use in requests. Mutually exclusive with pubsub.topics-config-file flag.")
 	requestSubscriberID = flag.String("pubsub.request-subscriber-id", "", "GCP PubSub request topic subscriber ID. Mutually exclusive with pubsub.topics-config-file flag.")
 	resultTopicID       = flag.String("pubsub.result-topic-id", "", "GCP PubSub topic ID for results")
-	topicsConfigFile    = flag.String("pubsub.topics-config-file", "", "Topics Configuration file. Mutually exclusive with pubsub.request-subscriber-id, pubsub.request-path-url and pubsub.inference-objective flags. See documentation about syntax")
+	topicsConfigFile    = flag.String("pubsub.topics-config-file", "", "Topics Configuration file. Mutually exclusive with pubsub.igw-base-url, pubsub.request-subscriber-id, pubsub.request-path-url and pubsub.inference-objective flags. See documentation about syntax")
 	batchSize           = flag.Int("pubsub.batch-size", 10, "Number of inflight messages")
 
 	resultChannels sync.Map
@@ -39,6 +40,7 @@ type TopicConfig struct {
 	SubscriberID       string `json:"subscriber_id"`
 	InferenceObjective string `json:"inference_objective"`
 	RequestPathURL     string `json:"request_path_url"`
+	IGWBaseURl         string `json:"igw_base_url"`
 }
 type PubSubMQFlow struct {
 	resultTopicID   string
@@ -82,7 +84,7 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 			panic(fmt.Sprintf("failed to unmarshal topics config: %v", err))
 		}
 	} else {
-		configs = []TopicConfig{{SubscriberID: *requestSubscriberID, InferenceObjective: *inferenceObjective, RequestPathURL: *requestPathURL}}
+		configs = []TopicConfig{{SubscriberID: *requestSubscriberID, IGWBaseURl: *igwBaseURL, InferenceObjective: *inferenceObjective, RequestPathURL: *requestPathURL}}
 	}
 
 	var channels []RequestChannelData
@@ -92,6 +94,7 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 		channels = append(channels, RequestChannelData{
 			requestChannel: api.RequestChannel{
 				Channel:            ch,
+				IGWBaseURl:         util.NormalizeBaseURL(cfg.IGWBaseURl),
 				InferenceObjective: cfg.InferenceObjective,
 				RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
 			},

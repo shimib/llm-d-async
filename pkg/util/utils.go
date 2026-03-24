@@ -9,6 +9,10 @@ func NormalizeURLPath(path string) string {
 }
 
 func NormalizeBaseURL(baseURL string) string {
+	if len(baseURL) == 0 {
+		return ""
+	}
+
 	//convert to loop
 	for baseURL[len(baseURL)-1] == '/' {
 		baseURL = baseURL[:len(baseURL)-1]

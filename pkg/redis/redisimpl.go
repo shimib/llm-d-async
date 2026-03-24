@@ -21,8 +21,8 @@ import (
 const QUEUE_NAME_KEY = "queue_name"
 
 var (
-	redisAddr = flag.String("redis.addr", "localhost:6379", "address of the Redis server")
-
+	redisAddr          = flag.String("redis.addr", "localhost:6379", "address of the Redis server")
+	igwBaseURL         = flag.String("redis.igw-base-url", "", "Base URL for IGW. Mutually exclusive with redis.queues-config-file flag.")
 	requestPathURL     = flag.String("redis.request-path-url", "/v1/completions", "request path url. Mutually exclusive with redis.queues-config-file flag.")
 	inferenceObjective = flag.String("redis.inference-objective", "", "inference objective to use in requests. Mutually exclusive with redis.queues-config-file flag.")
 	requestQueueName   = flag.String("redis.request-queue-name", "request-queue", "name of the Redis channel for request messages. Mutually exclusive with redis.queues-config-file flag.")
@@ -30,13 +30,14 @@ var (
 	retryQueueName  = flag.String("redis.retry-queue-name", "retry-sortedset", "name of the Redis sorted set for retry messages")
 	resultQueueName = flag.String("redis.result-queue-name", "result-queue", "name of the Redis channel for result messages")
 
-	queuesConfigFile = flag.String("redis.queues-config-file", "", "Queues Configuration file. Mutually exclusive with redis.request-queue-name, redis.request-path-url and redis.inference-objective flags. See documentation about syntax")
+	queuesConfigFile = flag.String("redis.queues-config-file", "", "Queues Configuration file. Mutually exclusive with redis.igw-base-url, redis.request-queue-name, redis.request-path-url and redis.inference-objective flags. See documentation about syntax")
 )
 
 type QueueConfig struct {
 	QueueName          string `json:"queue_name"`
 	InferenceObjective string `json:"inference_objective"`
 	RequestPathURL     string `json:"request_path_url"`
+	IGWBaseURl         string `json:"igw_base_url"`
 }
 
 type RequestChannelData struct {
@@ -66,7 +67,7 @@ func NewRedisMQFlow() *RedisMQFlow {
 			panic(fmt.Sprintf("failed to unmarshal queues config: %v", err))
 		}
 	} else {
-		configs = []QueueConfig{{QueueName: *requestQueueName, InferenceObjective: *inferenceObjective, RequestPathURL: *requestPathURL}}
+		configs = []QueueConfig{{QueueName: *requestQueueName, IGWBaseURl: *igwBaseURL, InferenceObjective: *inferenceObjective, RequestPathURL: *requestPathURL}}
 	}
 
 	var channels []RequestChannelData
@@ -78,6 +79,7 @@ func NewRedisMQFlow() *RedisMQFlow {
 			Channel:            ch,
 			InferenceObjective: cfg.InferenceObjective,
 			RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
+			IGWBaseURl:         util.NormalizeBaseURL(cfg.IGWBaseURl),
 		}, cfg.QueueName})
 	}
 	return &RedisMQFlow{

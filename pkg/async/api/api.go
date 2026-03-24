@@ -40,8 +40,8 @@ type RequestMessage struct {
 }
 
 type RequestChannel struct {
-	Channel chan RequestMessage
-
+	Channel            chan RequestMessage
+	IGWBaseURl         string
 	InferenceObjective string
 	RequestPathURL     string
 }
@@ -52,9 +52,9 @@ type EmbelishedRequestChannel struct {
 
 type EmbelishedRequestMessage struct {
 	RequestMessage
-	HttpHeaders    map[string]string
-	RequestPathURL string
-	Metadata       map[string]string
+	HttpHeaders map[string]string
+	RequestURL  string
+	Metadata    map[string]string
 }
 
 type RetryMessage struct {

@@ -23,6 +23,7 @@ const SORTEDSET_QUEUE_NAME_KEY = "queue_name"
 
 var (
 	ssRedisAddr          = flag.String("redis.ss.addr", "localhost:6379", "Redis server address")
+	ssIGWBaseURL         = flag.String("redis.ss.igw-base-url", "", "IGW base URL")
 	ssRequestPathURL     = flag.String("redis.ss.request-path-url", "/v1/completions", "Request path URL")
 	ssInferenceObjective = flag.String("redis.ss.inference-objective", "", "Inference objective header")
 	ssRequestQueueName   = flag.String("redis.ss.request-queue-name", "request-sortedset", "Request sorted set name")
@@ -36,6 +37,7 @@ type queueConfig struct {
 	QueueName          string `json:"queue_name"`
 	InferenceObjective string `json:"inference_objective"`
 	RequestPathURL     string `json:"request_path_url"`
+	IGWBaseURl         string `json:"igw_base_url"`
 }
 
 type requestChannelData struct {
@@ -76,6 +78,7 @@ func NewRedisSortedSetFlow(opts ...SortedSetOption) *RedisSortedSetFlow {
 				Channel:            make(chan api.RequestMessage),
 				InferenceObjective: cfg.InferenceObjective,
 				RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
+				IGWBaseURl:         util.NormalizeBaseURL(cfg.IGWBaseURl),
 			},
 			queueName: cfg.QueueName,
 		})
@@ -117,6 +120,7 @@ func loadQueueConfigs() []queueConfig {
 		QueueName:          *ssRequestQueueName,
 		InferenceObjective: *ssInferenceObjective,
 		RequestPathURL:     *ssRequestPathURL,
+		IGWBaseURl:         *ssIGWBaseURL,
 	}}
 }
 

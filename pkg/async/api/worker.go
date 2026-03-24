@@ -19,7 +19,7 @@ import (
 
 var baseDelaySeconds = 2
 
-func Worker(ctx context.Context, characteristics Characteristics, igwBaseURL string, httpClient *http.Client, requestChannel chan EmbelishedRequestMessage,
+func Worker(ctx context.Context, characteristics Characteristics, httpClient *http.Client, requestChannel chan EmbelishedRequestMessage,
 	retryChannel chan RetryMessage, resultChannel chan ResultMessage) {
 
 	logger := log.FromContext(ctx)
@@ -41,9 +41,8 @@ func Worker(ctx context.Context, characteristics Characteristics, igwBaseURL str
 			// Using a function object for easy boundaries for 'return' and 'defer'!
 			sendInferenceRequest := func() {
 
-				fullUrl := igwBaseURL + msg.RequestPathURL
-				logger.V(logutil.DEBUG).Info("Sending inference request: " + fullUrl)
-				request, err := http.NewRequestWithContext(ctx, "POST", fullUrl, bytes.NewBuffer(payloadBytes))
+				logger.V(logutil.DEBUG).Info("Sending inference request: " + msg.RequestURL)
+				request, err := http.NewRequestWithContext(ctx, "POST", msg.RequestURL, bytes.NewBuffer(payloadBytes))
 				if err != nil {
 					metrics.FailedReqs.Inc()
 					resultChannel <- CreateErrorResultMessage(msg.RequestMessage, fmt.Sprintf("Failed to create request to inference: %s", err.Error()))

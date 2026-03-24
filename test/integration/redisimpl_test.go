@@ -36,8 +36,8 @@ func TestRedisImpl(t *testing.T) {
 				Payload:         map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
 				Metadata:        map[string]string{redis.QUEUE_NAME_KEY: "request-queue"},
 			},
-			RequestPathURL: "/v1/completions",
-			HttpHeaders:    map[string]string{},
+			RequestURL:  "http://localhost:30800/v1/completions",
+			HttpHeaders: map[string]string{},
 		},
 		BackoffDurationSeconds: 2,
 	}
