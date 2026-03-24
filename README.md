@@ -76,7 +76,6 @@ make deploy-ap-on-k8s
      ```
 
 ## Command line parameters
-- `igw-base-url`: Base URL of the IGW (e.g. https://localhost:30800).
 - `concurrency`: The number of concurrenct workers, default is 8.
 - `request-merge-policy`: Currently only supporting <u>random-robin</u> policy.
 - `message-queue-impl`: Implementation of the queueing system. Options are <u>gcp-pubsub</u> for GCP PubSub <u>redis-sortedset</u> for Redis Sorted Set (persisted and sorted) and  <u>redis-pubsub</u> for ephemeral Redis-based implementation.
@@ -145,11 +144,12 @@ A persisted implementation based on Redis SortedSets.
 
 #### Redis Sorted Set Command line parameters
 - `redis.ss.addr`: Address of the Redis server. Default is <u>localhost:6379</u>.
-- `redis.ss.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutually exclusive with redis.queues-config-file flag.")
+- `redis.ss.igw-base-url`: Base URL of the IGW (e.g. https://localhost:30800).<br> Mutually exclusive with `redis.ss.queues-config-file` flag.
+- `redis.ss.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutually exclusive with `redis.ss.queues-config-file` flag.")
 - `redis.ss.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty).  <br> Mutually exclusive with `redis.ss.queues-config-file` flag.
 - `redis.ss.request-queue-name`: The name of the sorted-set for the requests. Default is <u>request-sortedset</u>.  <br> Mutually exclusive with `redis.ss.queues-config-file` flag.
 - `redis.ss.result-queue-name`: The name of the list for the results. Default is <u>result-list</u>.
-- `redis.ss.queues-config-file`: The configuration file name when using multiple queues. <br> Mutually exclusive with `redis.ss.request-queue-name`, `redis.ss.request-path-url` and `redis.ss.inference-objective` flags.
+- `redis.ss.queues-config-file`: The configuration file name when using multiple queues. <br> Mutually exclusive with `redis.ss.igw-base-url`, `redis.ss.request-queue-name`, `redis.ss.request-path-url` and `redis.ss.inference-objective` flags.
 - `redis.ss.poll-interval-ms`: Poll interval in milliseconds. Default is <u>1000</u>.
 - `redis.ss.batch-size`: Number of messages to process per poll. Default is <u>10</u>.
 
@@ -170,12 +170,13 @@ An example implementation based on Redis channels is provided.
 #### Redis Channels Command line parameters
 
 - `redis.addr`: Address of the Redis server. Default is <u>localhost:6379</u>.
-- `redis.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutually exclusive with redis.queues-config-file flag.")
+- `redis.igw-base-url`: Base URL of the IGW (e.g. https://localhost:30800).<br> Mutually exclusive with `redis.queues-config-file` flag.
+- `redis.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutually exclusive with `redis.queues-config-file` flag.")
 - `redis.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty).  <br> Mutually exclusive with `redis.queues-config-file` flag.
 - `redis.request-queue-name`: The name of the channel for the requests. Default is <u>request-queue</u>.  <br> Mutually exclusive with `redis.queues-config-file` flag.
 - `redis.retry-queue-name`: The name of the channel for the retries. Default is <u>retry-sortedset</u>.
 - `redis.result-queue-name`: The name of the channel for the results. Default is <u>result-queue</u>.
-- `redis.queues-config-file`: The configuration file name when using multiple queues. <br> Mutually exclusive with `redis.request-queue-name`, `redis.request-path-url` and `redis.inference-objective` flags.
+- `redis.queues-config-file`: The configuration file name when using multiple queues. <br> Mutually exclusive with `redis.igw-base-url`, `redis.request-queue-name`, `redis.request-path-url` and `redis.inference-objective` flags.
 
 #### Multiple Queues Configuration File Syntax
 
@@ -185,6 +186,7 @@ The configuration file when using the `redis.queues-config-file` flag should hav
 [
     {
        "queue_name": "some_channel_name", 
+       "igw_base_url": "http://localhost:30800",
        "inference_objective": "some_inference_objective", 
        "request_path_url": "e.g.: /v1/completions"
     },
@@ -211,9 +213,10 @@ The GCP PubSub implementation requires the user to configure the following:
 #### GCP PubSub Command line parameters
 
 - `pubsub.project-id`: The name GCP project ID using the PubSub API.
-- `pubsub.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutually exclusive with pubsub.topics-config-file flag.
-- `pubsub.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty). <br> Mutually exclusive with pubsub.topics-config-file flag.
-- `pubsub.request-subscriber-id`: The subscriber ID for the requests topic.<br> Mutually exclusive with pubsub.topics-config-file flag.
+- `pubsub.igw-base-url`: Base URL of the IGW (e.g. https://localhost:30800).<br> Mutually exclusive with `pubsub.topics-config-file` flag.
+- `pubsub.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutually exclusive with `pubsub.topics-config-file` flag.
+- `pubsub.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty). <br> Mutually exclusive with `pubsub.topics-config-file` flag.
+- `pubsub.request-subscriber-id`: The subscriber ID for the requests topic.<br> Mutually exclusive with `pubsub.topics-config-file` flag.
 - `pubsub.result-topic-id`: The results topic ID.
 - `pubsub.topics-config-file`: The configuration file name when using multiple topics. <br> Mutually exclusive with `pubsub.request-subscriber-id`, `pubsub.request-path-url` and `pubsub.inference-objective` flags.
 
@@ -224,6 +227,7 @@ The configuration file when using the `pubsub.topics-config-file` flag should ha
 ```json 
 [
     {
+       "igw_base_url": "http://localhost:30800",
        "subscriber_id": "some_subscriber_id", 
        "inference_objective": "some_inference_objective", 
        "request_path_url": "e.g.: /v1/completions"
