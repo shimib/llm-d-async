@@ -44,6 +44,7 @@ func TestSubmitRequest(t *testing.T) {
 
 	req := api.RequestMessage{
 		Id:              "test-123",
+		CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
 		DeadlineUnixSec: strconv.FormatInt(time.Now().Add(1*time.Hour).Unix(), 10),
 		Payload: map[string]interface{}{
 			"model":  "gpt-3.5-turbo",
@@ -87,6 +88,7 @@ func TestSubmitRequest_Validation(t *testing.T) {
 		{
 			name: "missing ID",
 			req: api.RequestMessage{
+				CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
 				DeadlineUnixSec: strconv.FormatInt(time.Now().Unix(), 10),
 				Payload:         map[string]interface{}{},
 			},
@@ -95,8 +97,9 @@ func TestSubmitRequest_Validation(t *testing.T) {
 		{
 			name: "missing deadline",
 			req: api.RequestMessage{
-				Id:      "test",
-				Payload: map[string]interface{}{},
+				Id:             "test",
+				CreatedUnixSec: strconv.FormatInt(time.Now().Unix(), 10),
+				Payload:        map[string]interface{}{},
 			},
 			wantErr: "deadline is required",
 		},
@@ -104,6 +107,7 @@ func TestSubmitRequest_Validation(t *testing.T) {
 			name: "invalid deadline",
 			req: api.RequestMessage{
 				Id:              "test",
+				CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
 				DeadlineUnixSec: "0",
 				Payload:         map[string]interface{}{},
 			},
@@ -214,6 +218,7 @@ func TestMultipleTenantsIsolation(t *testing.T) {
 	// Submit requests from both tenants
 	req1 := api.RequestMessage{
 		Id:              "alice-request",
+		CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
 		DeadlineUnixSec: strconv.FormatInt(time.Now().Add(1*time.Hour).Unix(), 10),
 		Payload:         map[string]interface{}{"tenant": "alice"},
 	}
@@ -222,6 +227,7 @@ func TestMultipleTenantsIsolation(t *testing.T) {
 
 	req2 := api.RequestMessage{
 		Id:              "bob-request",
+		CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
 		DeadlineUnixSec: strconv.FormatInt(time.Now().Add(1*time.Hour).Unix(), 10),
 		Payload:         map[string]interface{}{"tenant": "bob"},
 	}

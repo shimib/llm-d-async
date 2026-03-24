@@ -81,7 +81,7 @@ make deploy-ap-on-k8s
 - `request-merge-policy`: Currently only supporting <u>random-robin</u> policy.
 - `message-queue-impl`: Implementation of the queueing system. Options are <u>gcp-pubsub</u> for GCP PubSub <u>redis-sortedset</u> for Redis Sorted Set (persisted and sorted) and  <u>redis-pubsub</u> for ephemeral Redis-based implementation.
 - `dispatch-gate`: Implementation of a dispatcher that is responsible for gating pulling messages from the queues. Options are :
-   - `noop`: The default. Respresents full availability of the system. Always pulling messages.
+   - `noop`: The default. Represents full availability of the system. Always pulling messages.
    - `metric-avg-queue-size`: Availability base on the model average queue size metric in Prometheus. If the queue size is non empty, messages will not be pulled from the respective queue.
    - `redis`: Availability of the system is pulled periodically from Redis (I.e., managed by external system).
 
@@ -94,6 +94,7 @@ The async processor expects request messages to have the following format:
 ```json
 {
     "id" : "unique identifier for result mapping",
+    "created": "created timestamp in Unix seconds",
     "deadline" : "deadline in Unix seconds",
     "payload" : {regular inference payload as a byte array}
 }
@@ -103,6 +104,7 @@ Example:
 ```json
 {
     "id" : "19933123533434",
+    "created": "1764044000",
     "deadline" : "1764045130",
     "payload": byte[]({"model":"food-review","prompt":"hi", "max_tokens":10,"temperature":0})
 }

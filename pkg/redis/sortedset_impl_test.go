@@ -50,6 +50,7 @@ func TestSortedSetFlow_MessageProcessing(t *testing.T) {
 	// Add message with valid deadline
 	msg := api.RequestMessage{
 		Id:              "msg-1",
+		CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
 		DeadlineUnixSec: "9999999999",
 		Payload:         map[string]any{"test": "data"},
 	}
@@ -101,7 +102,7 @@ func TestSortedSetFlow_DeadlineOrdering(t *testing.T) {
 	}
 
 	for _, m := range messages {
-		msg := api.RequestMessage{Id: m.id, DeadlineUnixSec: strconv.FormatInt(m.deadline, 10)}
+		msg := api.RequestMessage{Id: m.id, CreatedUnixSec: strconv.FormatInt(time.Now().Unix(), 10), DeadlineUnixSec: strconv.FormatInt(m.deadline, 10)}
 		msgBytes, _ := json.Marshal(msg)
 		rdb.ZAdd(ctx, queue, redis.Z{Score: float64(m.deadline), Member: string(msgBytes)})
 	}
@@ -146,7 +147,7 @@ func TestSortedSetFlow_ExpiredMessages(t *testing.T) {
 	}
 
 	pastDeadline := time.Now().Unix() - 100
-	msg := api.RequestMessage{Id: "expired", DeadlineUnixSec: strconv.FormatInt(pastDeadline, 10)}
+	msg := api.RequestMessage{Id: "expired", CreatedUnixSec: strconv.FormatInt(time.Now().Unix(), 10), DeadlineUnixSec: strconv.FormatInt(pastDeadline, 10)}
 	msgBytes, _ := json.Marshal(msg)
 	rdb.ZAdd(ctx, queue, redis.Z{Score: float64(pastDeadline), Member: string(msgBytes)})
 
@@ -197,7 +198,7 @@ func TestSortedSetFlow_MalformedMessages(t *testing.T) {
 	}
 
 	// Add valid message after malformed ones
-	validMsg := api.RequestMessage{Id: "valid", DeadlineUnixSec: "9999999999"}
+	validMsg := api.RequestMessage{Id: "valid", CreatedUnixSec: strconv.FormatInt(time.Now().Unix(), 10), DeadlineUnixSec: "9999999999"}
 	validBytes, _ := json.Marshal(validMsg)
 	rdb.ZAdd(ctx, queue, redis.Z{Score: float64(time.Now().Unix()), Member: string(validBytes)})
 
@@ -235,6 +236,7 @@ func TestSortedSetFlow_RetryBackoff(t *testing.T) {
 		EmbelishedRequestMessage: api.EmbelishedRequestMessage{
 			RequestMessage: api.RequestMessage{
 				Id:              "retry-1",
+				CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
 				DeadlineUnixSec: "9999999999",
 				RetryCount:      1,
 			},
@@ -305,7 +307,7 @@ func TestSortedSetFlow_NoRaceCondition(t *testing.T) {
 	numMessages := 20
 
 	for i := 0; i < numMessages; i++ {
-		msg := api.RequestMessage{Id: string(rune('A' + i)), DeadlineUnixSec: "9999999999"}
+		msg := api.RequestMessage{Id: string(rune('A' + i)), CreatedUnixSec: strconv.FormatInt(time.Now().Unix(), 10), DeadlineUnixSec: "9999999999"}
 		msgBytes, _ := json.Marshal(msg)
 		rdb.ZAdd(ctx, queue, redis.Z{Score: float64(time.Now().Unix()), Member: string(msgBytes)})
 	}
@@ -406,7 +408,7 @@ func TestSortedSetFlow_Integration(t *testing.T) {
 	flow.Start(ctx)
 
 	// Add message
-	msg := api.RequestMessage{Id: "integration", DeadlineUnixSec: "9999999999"}
+	msg := api.RequestMessage{Id: "integration", CreatedUnixSec: strconv.FormatInt(time.Now().Unix(), 10), DeadlineUnixSec: "9999999999"}
 	msgBytes, _ := json.Marshal(msg)
 	rdb.ZAdd(ctx, queue, redis.Z{Score: float64(time.Now().Unix()), Member: string(msgBytes)})
 
@@ -451,6 +453,7 @@ func TestSortedSetFlow_ZeroBudget(t *testing.T) {
 	// Add message with valid deadline
 	msg := api.RequestMessage{
 		Id:              "test-zero-budget",
+		CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
 		DeadlineUnixSec: "9999999999",
 		Payload:         map[string]any{"test": "data"},
 	}
@@ -515,6 +518,7 @@ func TestSortedSetFlow_PartialBudget(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		msg := api.RequestMessage{
 			Id:              "msg-" + strconv.Itoa(i),
+			CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
 			DeadlineUnixSec: "9999999999",
 		}
 		msgBytes, _ := json.Marshal(msg)
@@ -555,7 +559,7 @@ func TestSortedSetFlow_WithDispatchGateOption(t *testing.T) {
 	flow.Start(ctx)
 
 	// Add message
-	msg := api.RequestMessage{Id: "option-test", DeadlineUnixSec: "9999999999"}
+	msg := api.RequestMessage{Id: "option-test", CreatedUnixSec: strconv.FormatInt(time.Now().Unix(), 10), DeadlineUnixSec: "9999999999"}
 	msgBytes, _ := json.Marshal(msg)
 	rdb.ZAdd(ctx, queue, redis.Z{Score: float64(time.Now().Unix()), Member: string(msgBytes)})
 

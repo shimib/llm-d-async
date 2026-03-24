@@ -15,6 +15,7 @@ func TestRetryMessage_deadlinePassed(t *testing.T) {
 	msg := EmbelishedRequestMessage{
 		RequestMessage: RequestMessage{
 			Id:              "123",
+			CreatedUnixSec:  fmt.Sprintf("%d", time.Now().Unix()),
 			RetryCount:      0,
 			DeadlineUnixSec: fmt.Sprintf("%d", time.Now().Add(time.Second*-10).Unix()),
 		},
@@ -46,6 +47,7 @@ func TestRetryMessage_retry(t *testing.T) {
 	msg := EmbelishedRequestMessage{
 		RequestMessage: RequestMessage{
 			Id:              "123",
+			CreatedUnixSec:  fmt.Sprintf("%d", time.Now().Unix()),
 			RetryCount:      0,
 			DeadlineUnixSec: fmt.Sprintf("%d", time.Now().Add(time.Second*10).Unix()),
 		},
@@ -103,6 +105,7 @@ func TestSheddedRequest(t *testing.T) {
 	requestChannel <- EmbelishedRequestMessage{
 		RequestMessage: RequestMessage{
 			Id:              msgId,
+			CreatedUnixSec:  fmt.Sprintf("%d", time.Now().Unix()),
 			RetryCount:      0,
 			DeadlineUnixSec: fmt.Sprintf(("%d"), deadline),
 			Payload:         map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
@@ -143,6 +146,7 @@ func TestSuccessfulRequest(t *testing.T) {
 	requestChannel <- EmbelishedRequestMessage{
 		RequestMessage: RequestMessage{
 			Id:              msgId,
+			CreatedUnixSec:  fmt.Sprintf("%d", time.Now().Unix()),
 			RetryCount:      0,
 			DeadlineUnixSec: fmt.Sprintf(("%d"), deadline),
 			Payload:         map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
