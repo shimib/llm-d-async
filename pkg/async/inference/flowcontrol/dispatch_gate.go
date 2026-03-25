@@ -24,7 +24,8 @@ type DispatchGate interface {
 	// the fraction of system capacity available for new requests.
 	// A value of 0.0 indicates no available capacity (system at max allowed).
 	// A value of 1.0 indicates full capacity available (system is idle).
-	// The system always returns a valid value, even in case of internal error.
+	// Implementations must always return a value in [0.0, 1.0], even in case
+	// of internal error.
 	Budget(ctx context.Context) float64
 }
 

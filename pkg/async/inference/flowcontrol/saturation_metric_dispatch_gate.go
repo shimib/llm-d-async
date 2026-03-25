@@ -28,65 +28,69 @@ import (
 
 var saturationInferencePool = flag.String("gate.saturation.inference-pool", "", "inference pool name for saturation metric")
 var saturationThreshold = flag.Float64("gate.saturation.threshold", 0.8, "saturation threshold above which budget is zero")
+var saturationFallback = flag.Float64("gate.saturation.fallback", 0.0, "fallback saturation value on error/missing metrics; default 0.0")
 
 // SaturationMetricDispatchGate implements DispatchGate based on pool saturation.
 // It reads the inference_extension_flow_control_pool_saturation metric and
 // returns 0.0 if saturation is at or above the configured threshold,
-// otherwise returns 1 - saturation.
+// otherwise returns 1 - saturation, clamped to [0.0, 1.0].
+//
+// On error or missing/invalid data, the gate returns the configured fallback
+// budget (derived from the fallback saturation value, also clamped to [0.0, 1.0]).
 type SaturationMetricDispatchGate struct {
 	source     MetricSource
 	metricName string
 	labels     map[string]string
 	threshold  float64
+	fallback   float64
 }
 
 // NewSaturationMetricDispatchGate creates a new gate that queries Prometheus for the pool saturation metric.
-func NewSaturationMetricDispatchGate(clientConfig api.Config, inferencePool string, threshold float64) *SaturationMetricDispatchGate {
+func NewSaturationMetricDispatchGate(clientConfig api.Config, inferencePool string, threshold float64, fallback float64) *SaturationMetricDispatchGate {
 	source, err := NewPrometheusMetricSource(clientConfig)
 	if err != nil {
 		panic(err)
 	}
-	return NewSaturationMetricDispatchGateWithSource(source, inferencePool, threshold)
+	return NewSaturationMetricDispatchGateWithSource(source, inferencePool, threshold, fallback)
 }
 
 // NewSaturationMetricDispatchGateWithSource creates a new gate using the provided MetricSource.
-func NewSaturationMetricDispatchGateWithSource(source MetricSource, inferencePool string, threshold float64) *SaturationMetricDispatchGate {
+func NewSaturationMetricDispatchGateWithSource(source MetricSource, inferencePool string, threshold float64, fallback float64) *SaturationMetricDispatchGate {
 	return &SaturationMetricDispatchGate{
 		source:     source,
 		metricName: "inference_extension_flow_control_pool_saturation",
 		labels:     map[string]string{"inference_pool": inferencePool},
 		threshold:  threshold,
+		fallback:   math.Max(0.0, math.Min(1.0, 1.0-fallback)), // fallback is a saturation value; budget is clamped to [0,1]
 	}
 }
 
 // Budget implements DispatchGate.
-// On error or missing data it fails closed (returns 0.0) because without a
-// reliable saturation reading the system cannot confirm there is spare capacity,
-// so it is safer to hold back requests until the metric becomes available.
+// On error or missing data the gate returns the configured fallback budget.
+// The output is always clamped to [0.0, 1.0].
 func (g *SaturationMetricDispatchGate) Budget(ctx context.Context) float64 {
 	logger := log.FromContext(ctx)
 
 	samples, err := g.source.Query(ctx, g.metricName, g.labels)
 	if err != nil {
-		logger.V(logutil.DEFAULT).Info("MetricSource error, failing closed", "error", err)
-		return 0.0
+		logger.V(logutil.DEFAULT).Info("MetricSource error, using fallback value", "fallback", g.fallback, "error", err)
+		return g.fallback
 	}
 
 	if len(samples) == 0 {
-		logger.V(logutil.DEFAULT).Info("No saturation metrics found, failing closed")
-		return 0.0
+		logger.V(logutil.DEFAULT).Info("No saturation metrics found, using fallback value", "fallback", g.fallback)
+		return g.fallback
 	}
 
 	saturation := samples[0].Value
 	if math.IsNaN(saturation) || math.IsInf(saturation, 0) {
-		logger.V(logutil.DEFAULT).Info("Invalid saturation value, failing closed", "value", saturation)
-		return 0.0
+		logger.V(logutil.DEFAULT).Info("Invalid saturation value, using fallback value", "fallback", g.fallback, "value", saturation)
+		return g.fallback
 	}
-	saturation = math.Max(0.0, math.Min(1.0, saturation))
 	if saturation >= g.threshold {
 		return 0.0
 	}
-	return 1.0 - saturation
+	return math.Min(1.0, math.Max(0.0, 1.0-saturation))
 }
 
 // SaturationGate creates a SaturationMetricDispatchGate from command-line flags.
@@ -96,10 +100,10 @@ func SaturationGate() *SaturationMetricDispatchGate {
 		if err != nil {
 			panic(err)
 		}
-		return NewSaturationMetricDispatchGateWithSource(source, *saturationInferencePool, *saturationThreshold)
+		return NewSaturationMetricDispatchGateWithSource(source, *saturationInferencePool, *saturationThreshold, *saturationFallback)
 	}
 
 	return NewSaturationMetricDispatchGate(api.Config{
 		Address: *prometheusURL,
-	}, *saturationInferencePool, *saturationThreshold)
+	}, *saturationInferencePool, *saturationThreshold, *saturationFallback)
 }
