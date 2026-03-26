@@ -23,6 +23,8 @@ require (
 
 replace go.opentelemetry.io/otel/sdk v1.39.0 => go.opentelemetry.io/otel/sdk v1.40.0
 
+replace google.golang.org/grpc v1.79.2 => google.golang.org/grpc v1.79.3
+
 require (
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go v0.123.0 // indirect
