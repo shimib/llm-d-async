@@ -46,3 +46,4 @@ spec:
             - "--metrics-endpoint-auth=false"
             - "--concurrency=1"
             - "--redis.ss.gate-type=redis"
+            - "--redis.ss.gate-params={\"address\":\"redis.e2e-test.svc.cluster.local:6379\"}"
