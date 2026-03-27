@@ -13,12 +13,16 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/redis/go-redis/v9"
 
+	"cloud.google.com/go/pubsub"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
 )
 
 const (
 	requestQueue = "request-sortedset"
 	resultQueue  = "result-list"
+
+	requestTopicID = "request-topic"
+	resultSubID    = "result-sub"
 )
 
 var adminClient = &http.Client{Timeout: 10 * time.Second}
@@ -125,4 +129,51 @@ func makeRequestMessage(id string, deadlineOffset time.Duration) api.RequestMess
 		DeadlineUnixSec: fmt.Sprintf("%d", deadline.Unix()),
 		Payload:         map[string]any{"model": id, "prompt": "test"},
 	}
+}
+
+func publishToPubSub(ctx context.Context, client *pubsub.Client, topicID string, msg api.RequestMessage) {
+	data, err := json.Marshal(msg)
+	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
+
+	topic := client.Topic(topicID)
+	res := topic.Publish(ctx, &pubsub.Message{
+		Data: data,
+	})
+	_, err = res.Get(ctx)
+	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
+}
+
+func receiveFromPubSub(ctx context.Context, client *pubsub.Client, subID string) *api.ResultMessage {
+	sub := client.Subscription(subID)
+	// We use a short timeout and try to pull one message.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var result *api.ResultMessage
+	err := sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
+		var res api.ResultMessage
+		if err := json.Unmarshal(msg.Data, &res); err == nil {
+			result = &res
+			msg.Ack()
+			cancel() // Stop receiving after one message
+		} else {
+			msg.Nack()
+		}
+	})
+
+	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+		gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
+	}
+
+	return result
+}
+
+func drainPubSub(ctx context.Context, client *pubsub.Client, subID string) {
+	sub := client.Subscription(subID)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	_ = sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
+		msg.Ack()
+	})
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -22,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	k8slog "sigs.k8s.io/controller-runtime/pkg/log"
 
+	"cloud.google.com/go/pubsub"
 	"github.com/redis/go-redis/v9"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
@@ -33,6 +35,8 @@ const (
 
 	// redisManifest is the manifest for the Redis deployment and service.
 	redisManifest = "./yaml/redis.yaml"
+	// pubsubManifest is the manifest for the GCP Pub/Sub emulator.
+	pubsubManifest = "./yaml/pubsub-emulator.yaml"
 	// igwMockManifest is the manifest for the mock inference gateway.
 	igwMockManifest = "./yaml/igw-mock.yaml"
 	// promMockManifest is the manifest for the mock Prometheus server.
@@ -41,10 +45,13 @@ const (
 	asyncProcessorManifest = "./yaml/async-processor.yaml"
 	// asyncProcessorSaturationManifest is the manifest for the saturation-gated async-processor.
 	asyncProcessorSaturationManifest = "./yaml/async-processor-saturation.yaml"
+	// asyncProcessorPubsubManifest is the manifest for the pubsub async-processor.
+	asyncProcessorPubsubManifest = "./yaml/async-processor-pubsub.yaml"
 )
 
 var (
 	redisPort    string = env.GetEnvString("E2E_REDIS_PORT", "30379", ginkgo.GinkgoLogr)
+	pubsubPort   string = env.GetEnvString("E2E_PUBSUB_PORT", "30850", ginkgo.GinkgoLogr)
 	adminPort    string = env.GetEnvString("E2E_ADMIN_PORT", "30081", ginkgo.GinkgoLogr)
 	promMockPort string = env.GetEnvString("E2E_PROM_MOCK_PORT", "30091", ginkgo.GinkgoLogr)
 
@@ -58,15 +65,18 @@ var (
 	nsName = env.GetEnvString("NAMESPACE", "e2e-test", ginkgo.GinkgoLogr)
 
 	redisObjects                    []string
+	pubsubObjects                   []string
 	igwMockObjects                  []string
 	promMockObjects                 []string
 	asyncProcessorObjects           []string
 	asyncProcessorSaturationObjects []string
+	asyncProcessorPubsubObjects     []string
 	createdNameSpace                bool
 
-	rdb         *redis.Client
-	adminURL    string
-	promMockURL string
+	rdb          *redis.Client
+	pubsubClient *pubsub.Client
+	adminURL     string
+	promMockURL  string
 )
 
 func TestEndToEnd(t *testing.T) {
@@ -83,11 +93,15 @@ var _ = ginkgo.BeforeSuite(func() {
 	setupNameSpace()
 	applyManifests()
 	setupRedisClient()
+	setupPubSubClient()
 })
 
 var _ = ginkgo.AfterSuite(func() {
 	if rdb != nil {
 		rdb.Close() //nolint:errcheck
+	}
+	if pubsubClient != nil {
+		pubsubClient.Close() //nolint:errcheck
 	}
 
 	skipCleanup := env.GetEnvString("E2E_SKIP_CLEANUP", "false", ginkgo.GinkgoLogr)
@@ -119,6 +133,7 @@ func setupK8sCluster() {
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		}()
 		clusterConfig := strings.ReplaceAll(kindClusterConfig, "${REDIS_PORT}", redisPort)
+		clusterConfig = strings.ReplaceAll(clusterConfig, "${PUBSUB_PORT}", pubsubPort)
 		clusterConfig = strings.ReplaceAll(clusterConfig, "${ADMIN_PORT}", adminPort)
 		clusterConfig = strings.ReplaceAll(clusterConfig, "${PROM_MOCK_PORT}", promMockPort)
 		_, err := io.WriteString(stdin, clusterConfig)
@@ -159,6 +174,14 @@ func setupK8sCluster() {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 	kindLoadImage("redis:7-alpine")
+
+	// Pull and load pubsub emulator image
+	ginkgo.By("Pulling gcr.io/google.com/cloudsdktool/cloud-sdk:emulators")
+	command = exec.Command(containerRuntime, "pull", "gcr.io/google.com/cloudsdktool/cloud-sdk:emulators")
+	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+	kindLoadImage("gcr.io/google.com/cloudsdktool/cloud-sdk:emulators")
 }
 
 func kindLoadImage(image string) {
@@ -206,6 +229,9 @@ func applyManifests() {
 	ginkgo.By("Applying Redis manifest")
 	redisObjects = testutils.ApplyYAMLFile(testConfig, redisManifest)
 
+	ginkgo.By("Applying Pub/Sub manifest")
+	pubsubObjects = testutils.ApplyYAMLFile(testConfig, pubsubManifest)
+
 	ginkgo.By("Applying igw-mock manifest")
 	igwMockObjects = testutils.ApplyYAMLFile(testConfig, igwMockManifest)
 
@@ -225,6 +251,13 @@ func applyManifests() {
 		"${AP_IMAGE}": apImage,
 	})
 	asyncProcessorSaturationObjects = testutils.CreateObjsFromYaml(testConfig, apSatYamls)
+
+	ginkgo.By("Applying async-processor-pubsub manifest")
+	apPubsubYamls := testutils.ReadYaml(asyncProcessorPubsubManifest)
+	apPubsubYamls = substituteMany(apPubsubYamls, map[string]string{
+		"${AP_IMAGE}": apImage,
+	})
+	asyncProcessorPubsubObjects = testutils.CreateObjsFromYaml(testConfig, apPubsubYamls)
 }
 
 func setupRedisClient() {
@@ -247,6 +280,54 @@ func setupRedisClient() {
 		}
 		return resp.Body.Close()
 	}, 30*time.Second, 1*time.Second).Should(gomega.Succeed())
+}
+
+func setupPubSubClient() {
+	ginkgo.By("Creating Pub/Sub client on localhost:" + pubsubPort)
+	ctx := context.Background()
+	// Set the emulator host environment variable for the client
+	os.Setenv("PUBSUB_EMULATOR_HOST", "localhost:"+pubsubPort)
+
+	var err error
+	pubsubClient, err = pubsub.NewClient(ctx, "test-project")
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	// Create request and result topics/subscriptions
+	ginkgo.By("Creating request-topic and request-sub")
+	reqTopic, err := pubsubClient.CreateTopic(ctx, "request-topic")
+	if err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+
+	// Re-fetch topic if it already exists
+	if err != nil && strings.Contains(err.Error(), "AlreadyExists") {
+		reqTopic = pubsubClient.Topic("request-topic")
+	}
+
+	_, err = pubsubClient.CreateSubscription(ctx, "request-sub", pubsub.SubscriptionConfig{
+		Topic: reqTopic,
+	})
+	if err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+
+	ginkgo.By("Creating result-topic and result-sub")
+	resTopic, err := pubsubClient.CreateTopic(ctx, "result-topic")
+	if err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+
+	// Re-fetch topic if it already exists
+	if err != nil && strings.Contains(err.Error(), "AlreadyExists") {
+		resTopic = pubsubClient.Topic("result-topic")
+	}
+
+	_, err = pubsubClient.CreateSubscription(ctx, "result-sub", pubsub.SubscriptionConfig{
+		Topic: resTopic,
+	})
+	if err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
 }
 
 // projectRoot returns the root of the project (two levels up from test/e2e/).
@@ -275,6 +356,9 @@ nodes:
   - containerPort: 30379
     hostPort: ${REDIS_PORT}
     protocol: TCP
+  - containerPort: 30850
+    hostPort: ${PUBSUB_PORT}
+    protocol: TCP
   - containerPort: 30081
     hostPort: ${ADMIN_PORT}
     protocol: TCP
@@ -282,3 +366,4 @@ nodes:
     hostPort: ${PROM_MOCK_PORT}
     protocol: TCP
 `
+
