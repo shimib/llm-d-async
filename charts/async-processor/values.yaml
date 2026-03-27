@@ -22,6 +22,11 @@ ap:
      port: 6379
      host: "redis-master.redis.svc.cluster.local"
      requestPathURL: "/v1/completions"
+     auth:
+       enabled: false
+       secretName: "redis-creds"
+       usernameKey: "username"
+       passwordKey: "password"
   
 
 

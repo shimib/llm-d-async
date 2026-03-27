@@ -23,6 +23,8 @@ const SORTEDSET_QUEUE_NAME_KEY = "queue_name"
 
 var (
 	ssRedisAddr          = flag.String("redis.ss.addr", "localhost:6379", "Redis server address")
+	ssRedisUser          = flag.String("redis.ss.user", os.Getenv("REDIS_SS_USERNAME"), "username for the Redis server")
+	ssRedisPassword      = flag.String("redis.ss.password", os.Getenv("REDIS_SS_PASSWORD"), "password for the Redis server")
 	ssIGWBaseURL         = flag.String("redis.ss.igw-base-url", "", "IGW base URL")
 	ssRequestPathURL     = flag.String("redis.ss.request-path-url", "/v1/completions", "Request path URL")
 	ssInferenceObjective = flag.String("redis.ss.inference-objective", "", "Inference objective header")
@@ -87,7 +89,11 @@ func WithGateFactory(factory api.GateFactory) SortedSetOption {
 func NewRedisSortedSetFlow(opts ...SortedSetOption) *RedisSortedSetFlow {
 	configs := loadQueueConfigs()
 	r := &RedisSortedSetFlow{
-		rdb:             redis.NewClient(&redis.Options{Addr: *ssRedisAddr}),
+		rdb: redis.NewClient(&redis.Options{
+			Addr:     *ssRedisAddr,
+			Username: *ssRedisUser,
+			Password: *ssRedisPassword,
+		}),
 		requestChannels: make([]requestChannelData, 0, len(configs)),
 		retryChannel:    make(chan api.RetryMessage),
 		resultChannel:   make(chan api.ResultMessage),

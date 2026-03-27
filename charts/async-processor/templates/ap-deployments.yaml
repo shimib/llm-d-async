@@ -33,6 +33,12 @@ spec:
           - "{{ .Values.ap.redis.requestPathURL }}"
           - --redis.addr
           - "{{ .Values.ap.redis.host }}:{{ .Values.ap.redis.port }}"
+          {{- if .Values.ap.redis.auth.enabled }}
+          - --redis.user=$(REDIS_USERNAME)
+          - --redis.password=$(REDIS_PASSWORD)
+          - --redis.ss.user=$(REDIS_USERNAME)
+          - --redis.ss.password=$(REDIS_PASSWORD)
+          {{- end }}
           {{- else if .Values.gcpPubSub.enabled  }}
           - --message-queue-impl=gcp-pubsub
           - pubsub.request-subscriber-id={{ .Values.ap.gcpPubSub.requestSubscriberId }}
@@ -46,6 +52,18 @@ spec:
         env:
           - name: LOG_LEVEL
             value: {{ if .Values.ap.logging }}{{ .Values.ap.logging.level | default "info" | quote }}{{ else }}"info"{{ end }}
+          {{- if and .Values.ap.redis.enabled .Values.ap.redis.auth.enabled }}
+          - name: REDIS_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.ap.redis.auth.secretName }}
+                key: {{ .Values.ap.redis.auth.usernameKey }}
+          - name: REDIS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.ap.redis.auth.secretName }}
+                key: {{ .Values.ap.redis.auth.passwordKey }}
+          {{- end }}
         name: async-processor
       serviceAccountName: {{ include "async-processor.fullname" . }}
       terminationGracePeriodSeconds: 130
