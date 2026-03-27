@@ -23,7 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	k8slog "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub" // nolint:staticcheck
 	"github.com/redis/go-redis/v9"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
@@ -286,7 +286,7 @@ func setupPubSubClient() {
 	ginkgo.By("Creating Pub/Sub client on localhost:" + pubsubPort)
 	ctx := context.Background()
 	// Set the emulator host environment variable for the client
-	os.Setenv("PUBSUB_EMULATOR_HOST", "localhost:"+pubsubPort)
+	os.Setenv("PUBSUB_EMULATOR_HOST", "localhost:"+pubsubPort) // nolint:errcheck
 
 	var err error
 	pubsubClient, err = pubsub.NewClient(ctx, "test-project")
@@ -366,4 +366,3 @@ nodes:
     hostPort: ${PROM_MOCK_PORT}
     protocol: TCP
 `
-

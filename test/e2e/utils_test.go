@@ -13,7 +13,7 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/redis/go-redis/v9"
 
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub" // nolint:staticcheck
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
 )
 
