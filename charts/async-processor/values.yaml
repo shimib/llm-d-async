@@ -22,4 +22,10 @@ ap:
     # For redis-sortedset
     requestQueueName: "request-sortedset"
     resultQueueName: "result-list"
+    auth:
+       enabled: false
+       secretName: "redis-creds"
+       usernameKey: "username"
+       passwordKey: "password"
+ 
 

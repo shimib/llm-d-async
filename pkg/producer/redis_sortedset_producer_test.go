@@ -277,6 +277,37 @@ func TestMultipleTenantsIsolation(t *testing.T) {
 	assert.Contains(t, res2.Payload, "bob result")
 }
 
+func TestProducerAuth(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	mr.RequireAuth("producer-secret")
+
+	t.Run("fails without password", func(t *testing.T) {
+		_, err := NewRedisSortedSetProducer(RedisSortedSetConfig{
+			RedisAddr: mr.Addr(),
+			TenantID:  "test",
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "NOAUTH")
+	})
+
+	t.Run("succeeds with password", func(t *testing.T) {
+		producer, err := NewRedisSortedSetProducer(RedisSortedSetConfig{
+			RedisAddr:     mr.Addr(),
+			RedisPassword: "producer-secret",
+			TenantID:      "test",
+		})
+		assert.NoError(t, err)
+		defer producer.Close() // nolint:errcheck
+
+		ctx := context.Background()
+		err = producer.client.Ping(ctx).Err()
+		assert.NoError(t, err)
+	})
+}
+
 func TestTenantIDRequired(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)

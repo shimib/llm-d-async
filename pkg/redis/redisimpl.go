@@ -21,7 +21,6 @@ import (
 const QUEUE_NAME_KEY = "queue_name"
 
 var (
-	redisAddr          = flag.String("redis.addr", "localhost:6379", "address of the Redis server")
 	igwBaseURL         = flag.String("redis.igw-base-url", "", "Base URL for IGW. Mutually exclusive with redis.queues-config-file flag.")
 	requestPathURL     = flag.String("redis.request-path-url", "/v1/completions", "request path url. Mutually exclusive with redis.queues-config-file flag.")
 	inferenceObjective = flag.String("redis.inference-objective", "", "inference objective to use in requests. Mutually exclusive with redis.queues-config-file flag.")
@@ -54,7 +53,9 @@ type RedisMQFlow struct {
 
 func NewRedisMQFlow() *RedisMQFlow {
 	rdb := redis.NewClient(&redis.Options{
-		Addr: *redisAddr,
+		Addr:     *RedisAddr,
+		Username: *RedisUser,
+		Password: *RedisPassword,
 	})
 	var configs []QueueConfig
 	if *queuesConfigFile != "" {

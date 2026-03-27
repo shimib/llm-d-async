@@ -204,7 +204,7 @@ A persisted implementation based on Redis SortedSets.
 ![Async Processor - Redis Sorted Set architecture](/docs/images/redis_sortedset_architecture.png "AP - Redis SortedSet")
 
 #### Redis Sorted Set Command line parameters
-- `redis.ss.addr`: Address of the Redis server. Default is <u>localhost:6379</u>.
+- `redis.addr`: Address of the Redis server. Default is <u>localhost:6379</u>.
 - `redis.ss.igw-base-url`: Base URL of the IGW (e.g. https://localhost:30800).<br> Mutually exclusive with `redis.ss.queues-config-file` flag.
 - `redis.ss.request-path-url`: Request path url (e.g.: "/v1/completions"). <br> Mutually exclusive with `redis.ss.queues-config-file` flag.")
 - `redis.ss.inference-objective`: InferenceObjective to use for requests (set as the HTTP header x-gateway-inference-objective if not empty).  <br> Mutually exclusive with `redis.ss.queues-config-file` flag.

@@ -26,6 +26,14 @@ type RedisSortedSetConfig struct {
 	// Required.
 	RedisAddr string
 
+	// RedisUser is the username for the Redis server.
+	// Optional.
+	RedisUser string
+
+	// RedisPassword is the password for the Redis server.
+	// Optional.
+	RedisPassword string
+
 	// TenantID is the unique identifier for the tenant/customer.
 	// Required for multi-tenant isolation.
 	// System should assign this (e.g., from auth token, API key).
@@ -67,7 +75,9 @@ func NewRedisSortedSetProducer(config RedisSortedSetConfig) (*RedisSortedSetProd
 	namespacedResultQueue := fmt.Sprintf("results:%s:%s", config.TenantID, config.ResultQueueName)
 
 	client := redis.NewClient(&redis.Options{
-		Addr: config.RedisAddr,
+		Addr:     config.RedisAddr,
+		Username: config.RedisUser,
+		Password: config.RedisPassword,
 	})
 
 	// Test connection
