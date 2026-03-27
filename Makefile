@@ -272,3 +272,15 @@ mv $(1) $(1)-$(3) ;\
 } ;\
 ln -sf $(1)-$(3) $(1)
 endef
+
+## Copied from https://github.com/llm-d-incubation/batch-gateway 
+## publish-helm-chart: Patch chart for VERSION, package, append chart to SHA256SUMS, push to oci://ghcr.io/llm-d-incubation/charts (requires VERSION, yq, helm; GITHUB_TOKEN, GITHUB_ACTOR for push).
+.PHONY: publish-helm-chart
+publish-helm-chart:
+	@if [ -z "$(VERSION)" ]; then \
+	  echo "VERSION is required (e.g. VERSION=v1.0.0 make publish-helm-chart)"; exit 1; \
+	fi
+	@export VERSION="$(VERSION)"; \
+	export GITHUB_TOKEN="$(GITHUB_TOKEN)"; \
+	export GITHUB_ACTOR="$(GITHUB_ACTOR)"; \
+	./scripts/publish-helm-chart.sh
