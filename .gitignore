@@ -19,7 +19,7 @@ bin/
 vendor/
 
 # Release binaries
-releast/
+release/
 
 # Kind config file
 kind-config.yaml
