@@ -1,27 +1,33 @@
 ap:
-  igwBaseURL: "http://infra-sim-inference-gateway-istio.llm-d-sim.svc.cluster.local:80"
+  igwBaseURL: "http://infra-inference-scheduling-inference-gateway-istio.llm-d-inference-scheduler.svc.cluster.local:80"
   image:
     repository: ghcr.io/llm-d/async-processor
     tag: v0.0.1
-  imagePullPolicy: Never
-
+  imagePullPolicy: Always
   metrics:
     enabled: true
     port: 9090
     secure: false
-
+  # messageQueueImpl: "redis-sortedset" # can be "redis-sortedset", "redis-pubsub", or "gcp-pubsub"
   gcpPubSub:
     enabled: false
-    requestSubscriberId: xxx
-    resultTopicId: xxx 
+    requestSubscriberId: ""
+    resultTopicId: ""
     requestPathURL: "/v1/completions"
-
-
   redis:
-     enabled: true
-     port: 6379
-     host: "redis-master.redis.svc.cluster.local"
-     requestPathURL: "/v1/completions"
-  
-
-
+    enabled: false
+    port: 6379
+    host: "redis-master.redis.svc.cluster.local"
+    requestPathURL: "/v1/completions"
+    # For redis-sortedset
+    requestQueueName: "request-sortedset"
+    resultQueueName: "result-list"
+apiserver:
+  image:
+    tag: 0.0.1
+processor:
+  image:
+    tag: 0.0.1
+gc:
+  image:
+    tag: 0.0.1
