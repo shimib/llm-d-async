@@ -300,7 +300,7 @@ func TestProducerAuth(t *testing.T) {
 			TenantID:      "test",
 		})
 		assert.NoError(t, err)
-		defer producer.Close()
+		defer producer.Close() // nolint:errcheck
 
 		ctx := context.Background()
 		err = producer.client.Ping(ctx).Err()
