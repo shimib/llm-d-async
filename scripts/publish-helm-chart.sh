@@ -14,7 +14,7 @@
 ## Copied from https://github.com/llm-d-incubation/batch-gateway
 
 
-# set -euo pipefail
+set -euo pipefail
 
 VERSION="${VERSION:?VERSION is required (e.g. v1.0.0)}"
 CHART_VERSION="${VERSION#v}"
@@ -36,7 +36,7 @@ command -v helm >/dev/null 2>&1 || {
   exit 1
 }
 
-yq -i '.apiserver.image.tag = strenv(VERSION) | .processor.image.tag = strenv(VERSION) | .gc.image.tag = strenv(VERSION)' charts/async-processor/values.yaml
+yq -i '.ap.image.tag = strenv(VERSION)' charts/async-processor/values.yaml
 yq -i '.version = strenv(CHART_VERSION) | .appVersion = strenv(CHART_VERSION)' charts/async-processor/Chart.yaml
 
 helm package charts/async-processor -d release/

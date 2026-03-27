@@ -2,7 +2,7 @@ ap:
   igwBaseURL: "http://infra-inference-scheduling-inference-gateway-istio.llm-d-inference-scheduler.svc.cluster.local:80"
   image:
     repository: ghcr.io/llm-d/async-processor
-    tag: v0.0.1
+    tag: REPLACE_ME
   imagePullPolicy: Always
   metrics:
     enabled: true
@@ -22,12 +22,4 @@ ap:
     # For redis-sortedset
     requestQueueName: "request-sortedset"
     resultQueueName: "result-list"
-apiserver:
-  image:
-    tag: 0.0.1
-processor:
-  image:
-    tag: 0.0.1
-gc:
-  image:
-    tag: 0.0.1
+
