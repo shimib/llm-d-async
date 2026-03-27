@@ -36,8 +36,6 @@ spec:
           {{- if .Values.ap.redis.auth.enabled }}
           - --redis.user=$(REDIS_USERNAME)
           - --redis.password=$(REDIS_PASSWORD)
-          - --redis.ss.user=$(REDIS_USERNAME)
-          - --redis.ss.password=$(REDIS_PASSWORD)
           {{- end }}
           {{- else if .Values.gcpPubSub.enabled  }}
           - --message-queue-impl=gcp-pubsub

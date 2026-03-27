@@ -75,8 +75,8 @@ func TestRedisImplWithAuth(t *testing.T) {
 	rAddr := s.Host() + ":" + s.Port()
 
 	ctx := context.Background()
-	_ = flag.Set("redis.ss.addr", rAddr)
-	_ = flag.Set("redis.ss.password", "test-password")
+	_ = flag.Set("redis.addr", rAddr)
+	_ = flag.Set("redis.password", "test-password")
 
 	flow := redis.NewRedisSortedSetFlow()
 	flow.Start(ctx)
