@@ -133,7 +133,10 @@ func resultWorker(ctx context.Context, rdb *redis.Client, resultChannel chan api
 			bytes, err := json.Marshal(msg)
 			var msgStr string
 			if err != nil {
-				msgStr = fmt.Sprintf(`{"id" : "%s", "error": "%s"}`, msg.Id, "Failed to marshal result to string")
+				// Safely marshal the fallback error message
+				fallback := map[string]string{"id": msg.Id, "error": "Failed to marshal result to string"}
+				fallbackBytes, _ := json.Marshal(fallback)
+				msgStr = string(fallbackBytes)
 			} else {
 				msgStr = string(bytes)
 			}

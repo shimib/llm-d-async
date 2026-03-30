@@ -188,7 +188,8 @@ func resultWorker(ctx context.Context, publisher *pubsub.Publisher, resultChanne
 			bytes, err := json.Marshal(msg)
 			var msgBytes []byte
 			if err != nil {
-				msgBytes = []byte(fmt.Sprintf(`{"id" : "%s", "error":  "Failed to marshal result to string"}`, msg.Id))
+				fallback := map[string]string{"id": msg.Id, "error": "Failed to marshal result to string"}
+				msgBytes, _ = json.Marshal(fallback)
 			} else {
 				msgBytes = bytes
 			}
@@ -278,7 +279,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 
 			resultsChannel := make(chan bool, 1)
 			resultChannels.Store(msg.ID, resultsChannel)
-			defer resultChannels.Delete(msgObj.Id)
+			defer resultChannels.Delete(msg.ID)
 
 			if msgObj.Metadata == nil {
 				msgObj.Metadata = make(map[string]string)
