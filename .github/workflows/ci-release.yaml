@@ -55,6 +55,23 @@ jobs:
             -t $IMAGE:$VERSION_TAG \
             -t $IMAGE:latest .
 
+      - name: Install dependencies for Helm publishing
+        run: |
+          sudo apt-get update && sudo apt-get install -y wget
+          # Install yq
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq && sudo chmod +x /usr/bin/yq
+          # helm is usually pre-installed on ubuntu-latest
+
+      - name: Publish Helm chart
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+        env:
+          VERSION: ${{ steps.tag.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          mkdir -p release
+          make publish-helm-chart
+
       - name: Run Trivy scan
         uses: ./.github/actions/trivy-scan
         with:

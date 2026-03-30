@@ -279,7 +279,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 
 			resultsChannel := make(chan bool, 1)
 			resultChannels.Store(msg.ID, resultsChannel)
-			defer resultChannels.Delete(msg.ID)
+			defer resultChannels.Delete(msgObj.Id)
 
 			if msgObj.Metadata == nil {
 				msgObj.Metadata = make(map[string]string)
