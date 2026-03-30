@@ -339,5 +339,7 @@ func (r *RedisSortedSetFlow) marshalResult(msg api.ResultMessage) string {
 	if bytes, err := json.Marshal(msg); err == nil {
 		return string(bytes)
 	}
-	return fmt.Sprintf(`{"id":"%s","payload":"{\"error\":\"marshal failed\"}"}`, msg.Id)
+	fallback := map[string]string{"id": msg.Id, "payload": `{"error":"marshal failed"}`}
+	fallbackBytes, _ := json.Marshal(fallback)
+	return string(fallbackBytes)
 }

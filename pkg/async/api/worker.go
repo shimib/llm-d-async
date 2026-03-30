@@ -133,9 +133,11 @@ func retryMessage(msg EmbelishedRequestMessage, retryChannel chan RetryMessage, 
 
 }
 func CreateErrorResultMessage(msg RequestMessage, errMsg string) ResultMessage {
+	payload := map[string]string{"error": errMsg}
+	payloadBytes, _ := json.Marshal(payload)
 	return ResultMessage{
 		Id:       msg.Id,
-		Payload:  `{"error": "` + errMsg + `"}`,
+		Payload:  string(payloadBytes),
 		Metadata: msg.Metadata,
 	}
 }
