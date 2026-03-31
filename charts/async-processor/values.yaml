@@ -2,7 +2,7 @@ ap:
   igwBaseURL: "http://infra-inference-scheduling-inference-gateway-istio.llm-d-inference-scheduler.svc.cluster.local:80"
   image:
     repository: ghcr.io/llm-d/async-processor
-    tag: REPLACE_ME
+    tag: 0.6.0
   imagePullPolicy: Always
   metrics:
     enabled: true
@@ -23,9 +23,7 @@ ap:
     requestQueueName: "request-sortedset"
     resultQueueName: "result-list"
     auth:
-       enabled: false
-       secretName: "redis-creds"
-       usernameKey: "username"
-       passwordKey: "password"
- 
-
+      enabled: false
+      secretName: "redis-creds"
+      usernameKey: "username"
+      passwordKey: "password"

@@ -27,7 +27,7 @@ spec:
           {{- if eq (.Values.ap.messageQueueImpl | default "redis-pubsub") "redis-sortedset" }}
           - --message-queue-impl=redis-sortedset
           - --redis.ss.igw-base-url={{ .Values.ap.igwBaseURL }}
-          - --redis.ss.addr
+          - --redis.addr
           - "{{ .Values.ap.redis.host }}:{{ .Values.ap.redis.port }}"
           - --redis.ss.request-path-url
           - "{{ .Values.ap.redis.requestPathURL }}"
