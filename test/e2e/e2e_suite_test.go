@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -12,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -77,6 +81,8 @@ var (
 	pubsubClient *pubsub.Client
 	adminURL     string
 	promMockURL  string
+
+	usedPorts = make(map[string]bool)
 )
 
 func TestEndToEnd(t *testing.T) {
@@ -87,6 +93,11 @@ func TestEndToEnd(t *testing.T) {
 }
 
 var _ = ginkgo.BeforeSuite(func() {
+	redisPort = getOrPickPort("E2E_REDIS_PORT", "30379")
+	pubsubPort = getOrPickPort("E2E_PUBSUB_PORT", "30850")
+	adminPort = getOrPickPort("E2E_ADMIN_PORT", "30081")
+	promMockPort = getOrPickPort("E2E_PROM_MOCK_PORT", "30091")
+
 	setupK8sCluster()
 	testConfig = testutils.NewTestConfig(nsName, "")
 	setupK8sClient()
@@ -295,38 +306,68 @@ func setupPubSubClient() {
 	// Create request and result topics/subscriptions
 	ginkgo.By("Creating request-topic and request-sub")
 	reqTopic, err := pubsubClient.CreateTopic(ctx, "request-topic")
-	if err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
+	if err != nil && status.Code(err) != codes.AlreadyExists {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 
 	// Re-fetch topic if it already exists
-	if err != nil && strings.Contains(err.Error(), "AlreadyExists") {
+	if err != nil && status.Code(err) == codes.AlreadyExists {
 		reqTopic = pubsubClient.Topic("request-topic")
 	}
 
 	_, err = pubsubClient.CreateSubscription(ctx, "request-sub", pubsub.SubscriptionConfig{
 		Topic: reqTopic,
 	})
-	if err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
+	if err != nil && status.Code(err) != codes.AlreadyExists {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 
 	ginkgo.By("Creating result-topic and result-sub")
 	resTopic, err := pubsubClient.CreateTopic(ctx, "result-topic")
-	if err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
+	if err != nil && status.Code(err) != codes.AlreadyExists {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 
 	// Re-fetch topic if it already exists
-	if err != nil && strings.Contains(err.Error(), "AlreadyExists") {
+	if err != nil && status.Code(err) == codes.AlreadyExists {
 		resTopic = pubsubClient.Topic("result-topic")
 	}
 
 	_, err = pubsubClient.CreateSubscription(ctx, "result-sub", pubsub.SubscriptionConfig{
 		Topic: resTopic,
 	})
-	if err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
+	if err != nil && status.Code(err) != codes.AlreadyExists {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+}
+
+func getOrPickPort(envVar, defaultPort string) string {
+	if v := os.Getenv(envVar); v != "" {
+		usedPorts[v] = true
+		return v
+	}
+	// Check if default port is free AND not already used by us
+	if !usedPorts[defaultPort] {
+		l, err := net.Listen("tcp", "localhost:"+defaultPort)
+		if err == nil {
+			l.Close()
+			usedPorts[defaultPort] = true
+			return defaultPort
+		}
+	}
+	// Default is taken or used, pick a free one
+	for {
+		l, err := net.Listen("tcp", "localhost:0")
+		if err != nil {
+			panic(fmt.Sprintf("failed to find a free port: %v", err))
+		}
+		_, port, _ := net.SplitHostPort(l.Addr().String())
+		l.Close()
+		if !usedPorts[port] {
+			usedPorts[port] = true
+			fmt.Fprintf(ginkgo.GinkgoWriter, "Default port %s is taken or already used, picked a free one: %s for %s\n", defaultPort, port, envVar)
+			return port
+		}
 	}
 }
 
