@@ -2,12 +2,30 @@
 -include .env
 export
 
+.DELETE_ON_ERROR:
+
 
 
 # Image URL to use all building/pushing image targets
 IMAGE_TAG_BASE ?= ghcr.io/llm-d-incubation
 IMG_TAG ?= latest
 IMG ?= $(IMAGE_TAG_BASE)/async-processor:$(IMG_TAG)
+
+# Versioning information
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION := $(VERSION)
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+COMMIT := $(COMMIT)
+DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
+DATE := $(DATE)
+
+# Build flags
+LDFLAGS := -s -w \
+	-X github.com/llm-d-incubation/llm-d-async/pkg/version.Version=$(VERSION) \
+	-X github.com/llm-d-incubation/llm-d-async/pkg/version.Commit=$(COMMIT) \
+	-X github.com/llm-d-incubation/llm-d-async/pkg/version.BuildDate=$(DATE)
+
+# KIND_ARGS etc.
 KIND_ARGS ?= -t mix -n 3 -g 2   # Default: 3 nodes, 2 GPUs per node, mixed vendors
 CLUSTER_GPU_TYPE ?= mix
 CLUSTER_NODES ?= 3
@@ -32,9 +50,9 @@ DELETE_NAMESPACES ?= false
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
-GOBIN=$(shell go env GOPATH)/bin
+GOBIN := $(shell go env GOPATH)/bin
 else
-GOBIN=$(shell go env GOBIN)
+GOBIN := $(shell go env GOBIN)
 endif
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
@@ -150,18 +168,22 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: build
 build:   fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
 
 .PHONY: run
 run:   fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+	go run -ldflags "$(LDFLAGS)" ./cmd/main.go
+
+.PHONY: clean
+clean: ## Clean binaries.
+	rm -rf bin/
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+	$(CONTAINER_TOOL) build --build-arg LDFLAGS="$(LDFLAGS)" -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -180,10 +202,10 @@ BUILDER_NAME ?= async-processor-builder
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name async-processor-builder
-	$(CONTAINER_TOOL) buildx use async-processor-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm async-processor-builder
+	- $(CONTAINER_TOOL) buildx create --name $(BUILDER_NAME)
+	$(CONTAINER_TOOL) buildx use $(BUILDER_NAME)
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --build-arg LDFLAGS="$(LDFLAGS)" --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx rm $(BUILDER_NAME)
 	rm Dockerfile.cross
 
 ##@ Deployment
@@ -205,6 +227,7 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
+LOCALBIN := $(LOCALBIN)
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
@@ -220,9 +243,11 @@ KUSTOMIZE_VERSION ?= v5.6.0
 CONTROLLER_TOOLS_VERSION ?= v0.17.2
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
 ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
+ENVTEST_VERSION := $(ENVTEST_VERSION)
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
-GOLANGCI_LINT_VERSION ?= v2.11.4
+ENVTEST_K8S_VERSION := $(ENVTEST_K8S_VERSION)
+GOLANGCI_LINT_VERSION ?= v1.64.5
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -247,7 +272,7 @@ $(ENVTEST): $(LOCALBIN)
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
 
 GINKGO ?= $(LOCALBIN)/ginkgo
 GINKGO_VERSION ?= v2.28.1

@@ -14,6 +14,7 @@ import (
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
 	"github.com/llm-d-incubation/llm-d-async/pkg/pubsub"
 	"github.com/llm-d-incubation/llm-d-async/pkg/redis"
+	"github.com/llm-d-incubation/llm-d-async/pkg/version"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
@@ -59,7 +60,7 @@ func main() {
 	setupLog := ctrl.Log.WithName("setup")
 	setupLog.Info("Logger initialized")
 
-	////////setupLog.Info("GIE build", "commit-sha", version.CommitSHA, "build-ref", version.BuildRef)
+	setupLog.Info("Async Processor starting", "version", version.Version, "commit", version.Commit, "buildDate", version.BuildDate)
 
 	printAllFlags(setupLog)
 	// Create Gate Factory for per-queue gate instantiation
