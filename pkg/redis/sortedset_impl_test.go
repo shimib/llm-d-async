@@ -12,6 +12,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
+	"github.com/llm-d-incubation/llm-d-async/pkg/config"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -35,15 +36,17 @@ func TestSortedSetFlow_MessageProcessing(t *testing.T) {
 	defer cancel()
 
 	queue := "test-queue"
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.PollIntervalMs = 50
+	cfg.BatchSize = 10
 	flow := &RedisSortedSetFlow{
 		rdb: rdb,
 		requestChannels: []requestChannelData{{
 			channel:   api.RequestChannel{Channel: make(chan api.RequestMessage)},
 			queueName: queue,
 		}},
-		pollInterval: 50 * time.Millisecond,
-		batchSize:    10,
-		gate:         noopGate(),
+		cfg:  cfg,
+		gate: noopGate(),
 	}
 
 	// Add message with valid deadline
@@ -83,11 +86,13 @@ func TestSortedSetFlow_DeadlineOrdering(t *testing.T) {
 	defer cancel()
 
 	queue := "priority-queue"
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.PollIntervalMs = 50
+	cfg.BatchSize = 10
 	flow := &RedisSortedSetFlow{
-		rdb:          rdb,
-		pollInterval: 50 * time.Millisecond,
-		batchSize:    10,
-		gate:         noopGate(),
+		rdb:  rdb,
+		cfg:  cfg,
+		gate: noopGate(),
 	}
 
 	now := time.Now().Unix()
@@ -134,15 +139,17 @@ func TestSortedSetFlow_ExpiredMessages(t *testing.T) {
 	defer cancel()
 
 	queue := "expired-queue"
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.PollIntervalMs = 50
+	cfg.BatchSize = 10
 	flow := &RedisSortedSetFlow{
 		rdb: rdb,
 		requestChannels: []requestChannelData{{
 			channel:   api.RequestChannel{Channel: make(chan api.RequestMessage)},
 			queueName: queue,
 		}},
-		pollInterval: 50 * time.Millisecond,
-		batchSize:    10,
-		gate:         noopGate(),
+		cfg:  cfg,
+		gate: noopGate(),
 	}
 
 	pastDeadline := time.Now().Unix() - 100
@@ -172,15 +179,17 @@ func TestSortedSetFlow_MalformedMessages(t *testing.T) {
 	defer cancel()
 
 	queue := "malformed-queue"
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.PollIntervalMs = 50
+	cfg.BatchSize = 10
 	flow := &RedisSortedSetFlow{
 		rdb: rdb,
 		requestChannels: []requestChannelData{{
 			channel:   api.RequestChannel{Channel: make(chan api.RequestMessage)},
 			queueName: queue,
 		}},
-		pollInterval: 50 * time.Millisecond,
-		batchSize:    10,
-		gate:         noopGate(),
+		cfg:  cfg,
+		gate: noopGate(),
 	}
 
 	testCases := []struct {
@@ -221,11 +230,14 @@ func TestSortedSetFlow_RetryBackoff(t *testing.T) {
 	defer cancel()
 
 	queue := "retry-queue"
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.RequestQueueName = queue
+	cfg.PollIntervalMs = 50
+	cfg.BatchSize = 10
 	flow := &RedisSortedSetFlow{
 		rdb:          rdb,
 		retryChannel: make(chan api.RetryMessage, 1),
-		pollInterval: 50 * time.Millisecond,
-		batchSize:    10,
+		cfg:          cfg,
 		gate:         noopGate(),
 	}
 
@@ -265,15 +277,15 @@ func TestSortedSetFlow_ResultFIFO(t *testing.T) {
 	defer cancel()
 
 	queue := "result-queue"
-	origQueue := *ssResultQueueName
-	*ssResultQueueName = queue
-	defer func() { *ssResultQueueName = origQueue }()
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.ResultQueueName = queue
+	cfg.PollIntervalMs = 50
+	cfg.BatchSize = 10
 
 	flow := &RedisSortedSetFlow{
 		rdb:           rdb,
 		resultChannel: make(chan api.ResultMessage, 2),
-		pollInterval:  50 * time.Millisecond,
-		batchSize:     10,
+		cfg:           cfg,
 		gate:          noopGate(),
 	}
 
@@ -314,9 +326,13 @@ func TestSortedSetFlow_NoRaceCondition(t *testing.T) {
 	var wg sync.WaitGroup
 	processed := make(chan string, numMessages*2)
 
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.PollIntervalMs = 20
+	cfg.BatchSize = 10
+
 	for w := 0; w < 3; w++ {
 		wg.Add(1)
-		flow := &RedisSortedSetFlow{rdb: rdb, pollInterval: 20 * time.Millisecond, batchSize: 10, gate: noopGate()}
+		flow := &RedisSortedSetFlow{rdb: rdb, cfg: cfg, gate: noopGate()}
 		msgChan := make(chan api.RequestMessage, 10)
 
 		go func() {
@@ -360,12 +376,14 @@ func TestSortedSetFlow_ContextCancellation(t *testing.T) {
 	defer rdb.Close() // nolint:errcheck
 
 	queue := "cancel-queue"
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.PollIntervalMs = 50
+	cfg.BatchSize = 10
 	flow := &RedisSortedSetFlow{
 		rdb:           rdb,
 		retryChannel:  make(chan api.RetryMessage),
 		resultChannel: make(chan api.ResultMessage),
-		pollInterval:  50 * time.Millisecond,
-		batchSize:     10,
+		cfg:           cfg,
 		gate:          noopGate(),
 	}
 
@@ -396,13 +414,13 @@ func TestSortedSetFlow_Integration(t *testing.T) {
 	defer cancel()
 
 	queue := "integration-queue"
-	origQueue := *ssRequestQueueName
-	*ssRequestQueueName = queue
-	defer func() { *ssRequestQueueName = origQueue }()
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.RequestQueueName = queue
+	cfg.PollIntervalMs = 50
+	cfg.BatchSize = 10
 
-	flow := NewRedisSortedSetFlow()
+	flow := NewRedisSortedSetFlow(cfg)
 	flow.rdb = rdb // Override with test Redis
-	flow.pollInterval = 50 * time.Millisecond
 
 	flow.Start(ctx)
 
@@ -438,15 +456,17 @@ func TestSortedSetFlow_ZeroBudget(t *testing.T) {
 		return math.Float64frombits(budgetValue.Load())
 	})
 
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.PollIntervalMs = 50
+	cfg.BatchSize = 10
 	flow := &RedisSortedSetFlow{
 		rdb: rdb,
 		requestChannels: []requestChannelData{{
 			channel:   api.RequestChannel{Channel: make(chan api.RequestMessage)},
 			queueName: queue,
 		}},
-		pollInterval: 50 * time.Millisecond,
-		batchSize:    10,
-		gate:         gate,
+		cfg:  cfg,
+		gate: gate,
 	}
 
 	// Add message with valid deadline
@@ -502,15 +522,17 @@ func TestSortedSetFlow_PartialBudget(t *testing.T) {
 		return 0.3
 	})
 
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.PollIntervalMs = 200
+	cfg.BatchSize = 10
 	flow := &RedisSortedSetFlow{
 		rdb: rdb,
 		requestChannels: []requestChannelData{{
 			channel:   api.RequestChannel{Channel: make(chan api.RequestMessage, 20)},
 			queueName: queue,
 		}},
-		pollInterval: 200 * time.Millisecond,
-		batchSize:    10,
-		gate:         gate,
+		cfg:  cfg,
+		gate: gate,
 	}
 
 	// Add 10 messages

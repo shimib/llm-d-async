@@ -18,26 +18,12 @@ package flowcontrol
 
 import (
 	"context"
-	"flag"
 	"math"
 
-	"github.com/prometheus/client_golang/api"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
-var saturationInferencePool = flag.String("gate.saturation.inference-pool", "", "inference pool name for saturation metric")
-var saturationThreshold = flag.Float64("gate.saturation.threshold", 0.8, "saturation threshold above which budget is zero")
-var saturationFallback = flag.Float64("gate.saturation.fallback", 0.0, "fallback saturation value on error/missing metrics; default 0.0")
-var saturationQueryExpr = flag.String("gate.saturation.query-expr", "", "custom PromQL expression for saturation metric; overrides inference-pool label selector")
-
-// SaturationMetricDispatchGate implements DispatchGate based on pool saturation.
-// It queries a MetricSource for saturation samples and returns 0.0 if saturation
-// is at or above the configured threshold, otherwise returns max(0, 1 - saturation),
-// clamped to [0.0, 1.0].
-//
-// On error or missing/invalid data, the gate returns the configured fallback
-// budget (derived from the fallback saturation value, also clamped to [0.0, 1.0]).
 type SaturationMetricDispatchGate struct {
 	source    MetricSource
 	threshold float64
@@ -79,32 +65,4 @@ func (g *SaturationMetricDispatchGate) Budget(ctx context.Context) float64 {
 		return 0.0
 	}
 	return math.Min(1.0, math.Max(0.0, 1.0-saturation))
-}
-
-// SaturationGate creates a SaturationMetricDispatchGate from command-line flags.
-func SaturationGate() *SaturationMetricDispatchGate {
-	expr := buildPromQL("inference_extension_flow_control_pool_saturation",
-		map[string]string{"inference_pool": *saturationInferencePool})
-	if *saturationQueryExpr != "" {
-		expr = *saturationQueryExpr
-	}
-
-	var source MetricSource
-	if *isGMP {
-		var err error
-		source, err = NewGMPPromQLMetricSource(*gmpProjectID, expr)
-		if err != nil {
-			panic(err)
-		}
-		return NewSaturationMetricDispatchGateWithSource(source, *saturationThreshold, *saturationFallback)
-	} else {
-		var err error
-		source, err = NewPromQLMetricSource(api.Config{
-			Address: *prometheusURL,
-		}, expr)
-		if err != nil {
-			panic(err)
-		}
-		return NewSaturationMetricDispatchGateWithSource(source, *saturationThreshold, *saturationFallback)
-	}
 }

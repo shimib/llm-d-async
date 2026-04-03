@@ -3,7 +3,6 @@ package redis
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
+	"github.com/llm-d-incubation/llm-d-async/pkg/config"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 	"github.com/redis/go-redis/v9"
 
@@ -19,18 +19,6 @@ import (
 )
 
 const QUEUE_NAME_KEY = "queue_name"
-
-var (
-	igwBaseURL         = flag.String("redis.igw-base-url", "", "Base URL for IGW. Mutually exclusive with redis.queues-config-file flag.")
-	requestPathURL     = flag.String("redis.request-path-url", "/v1/completions", "request path url. Mutually exclusive with redis.queues-config-file flag.")
-	inferenceObjective = flag.String("redis.inference-objective", "", "inference objective to use in requests. Mutually exclusive with redis.queues-config-file flag.")
-	requestQueueName   = flag.String("redis.request-queue-name", "request-queue", "name of the Redis channel for request messages. Mutually exclusive with redis.queues-config-file flag.")
-
-	retryQueueName  = flag.String("redis.retry-queue-name", "retry-sortedset", "name of the Redis sorted set for retry messages")
-	resultQueueName = flag.String("redis.result-queue-name", "result-queue", "name of the Redis channel for result messages")
-
-	queuesConfigFile = flag.String("redis.queues-config-file", "", "Queues Configuration file. Mutually exclusive with redis.igw-base-url, redis.request-queue-name, redis.request-path-url and redis.inference-objective flags. See documentation about syntax")
-)
 
 type QueueConfig struct {
 	QueueName          string `json:"queue_name"`
@@ -49,17 +37,18 @@ type RedisMQFlow struct {
 	requestChannels []RequestChannelData
 	retryChannel    chan api.RetryMessage
 	resultChannel   chan api.ResultMessage
+	cfg             config.RedisConfig
 }
 
-func NewRedisMQFlow() *RedisMQFlow {
+func NewRedisMQFlow(cfg config.RedisConfig) *RedisMQFlow {
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     *RedisAddr,
-		Username: *RedisUser,
-		Password: *RedisPassword,
+		Addr:     cfg.Conn.Addr,
+		Username: cfg.Conn.User,
+		Password: cfg.Conn.Password,
 	})
 	var configs []QueueConfig
-	if *queuesConfigFile != "" {
-		data, err := os.ReadFile(*queuesConfigFile)
+	if cfg.QueuesConfigFile != "" {
+		data, err := os.ReadFile(cfg.QueuesConfigFile)
 		if err != nil {
 			panic(fmt.Sprintf("failed to read queues config file: %v", err))
 		}
@@ -68,26 +57,27 @@ func NewRedisMQFlow() *RedisMQFlow {
 			panic(fmt.Sprintf("failed to unmarshal queues config: %v", err))
 		}
 	} else {
-		configs = []QueueConfig{{QueueName: *requestQueueName, IGWBaseURl: *igwBaseURL, InferenceObjective: *inferenceObjective, RequestPathURL: *requestPathURL}}
+		configs = []QueueConfig{{QueueName: cfg.RequestQueueName, IGWBaseURl: cfg.IGWBaseURL, InferenceObjective: cfg.InferenceObjective, RequestPathURL: cfg.RequestPathURL}}
 	}
 
 	var channels []RequestChannelData
 
-	for _, cfg := range configs {
+	for _, qcfg := range configs {
 		ch := make(chan api.RequestMessage)
 
 		channels = append(channels, RequestChannelData{api.RequestChannel{
 			Channel:            ch,
-			InferenceObjective: cfg.InferenceObjective,
-			RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
-			IGWBaseURl:         util.NormalizeBaseURL(cfg.IGWBaseURl),
-		}, cfg.QueueName})
+			InferenceObjective: qcfg.InferenceObjective,
+			RequestPathURL:     util.NormalizeURLPath(qcfg.RequestPathURL),
+			IGWBaseURl:         util.NormalizeBaseURL(qcfg.IGWBaseURl),
+		}, qcfg.QueueName})
 	}
 	return &RedisMQFlow{
 		rdb:             rdb,
 		requestChannels: channels,
 		retryChannel:    make(chan api.RetryMessage),
 		resultChannel:   make(chan api.ResultMessage),
+		cfg:             cfg,
 	}
 }
 
@@ -97,11 +87,11 @@ func (r *RedisMQFlow) Start(ctx context.Context) {
 		go requestWorker(ctx, r.rdb, channelData.requestChannel.Channel, channelData.queueName)
 	}
 
-	go addMsgToRetryWorker(ctx, r.rdb, r.retryChannel, *retryQueueName)
+	go addMsgToRetryWorker(ctx, r.rdb, r.retryChannel, r.cfg.RetryQueueName)
 
 	go r.retryWorker(ctx, r.rdb)
 
-	go resultWorker(ctx, r.rdb, r.resultChannel, *resultQueueName)
+	go resultWorker(ctx, r.rdb, r.resultChannel, r.cfg.ResultQueueName)
 }
 func (r *RedisMQFlow) RequestChannels() []api.RequestChannel {
 
@@ -233,7 +223,7 @@ func (r *RedisMQFlow) retryWorker(ctx context.Context, rdb *redis.Client) {
 			currentTimeSec := float64(time.Now().Unix())
 
 			results, err := rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
-				Key:     *retryQueueName,
+				Key:     r.cfg.RetryQueueName,
 				Start:   "0",
 				Stop:    strconv.FormatFloat(currentTimeSec, 'f', -1, 64),
 				ByScore: true,
@@ -248,7 +238,7 @@ func (r *RedisMQFlow) retryWorker(ctx context.Context, rdb *redis.Client) {
 					fmt.Println(err)
 
 				}
-				err = rdb.ZRem(ctx, *retryQueueName, msg).Err()
+				err = rdb.ZRem(ctx, r.cfg.RetryQueueName, msg).Err()
 				if err != nil {
 					fmt.Println(err)
 

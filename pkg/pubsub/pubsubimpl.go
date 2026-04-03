@@ -3,7 +3,6 @@ package pubsub
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"math"
 	"os"
@@ -12,6 +11,7 @@ import (
 
 	"cloud.google.com/go/pubsub/v2"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
+	"github.com/llm-d-incubation/llm-d-async/pkg/config"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -20,20 +20,7 @@ import (
 
 const PUBSUB_ID = "pubsub-id"
 
-var pubSubClient *pubsub.Client
-
-var (
-	igwBaseURL          = flag.String("pubsub.igw-base-url", "", "Base URL for IGW. Mutually exclusive with pubsub.topics-config-file flag.")
-	projectID           = flag.String("pubsub.project-id", "", "GCP project ID for PubSub")
-	requestPathURL      = flag.String("pubsub.request-path-url", "/v1/completions", "inference request path url. Mutually exclusive with pubsub.topics-config-file flag.")
-	inferenceObjective  = flag.String("pubsub.inference-objective", "", "inference objective to use in requests. Mutually exclusive with pubsub.topics-config-file flag.")
-	requestSubscriberID = flag.String("pubsub.request-subscriber-id", "", "GCP PubSub request topic subscriber ID. Mutually exclusive with pubsub.topics-config-file flag.")
-	resultTopicID       = flag.String("pubsub.result-topic-id", "", "GCP PubSub topic ID for results")
-	topicsConfigFile    = flag.String("pubsub.topics-config-file", "", "Topics Configuration file. Mutually exclusive with pubsub.igw-base-url, pubsub.request-subscriber-id, pubsub.request-path-url and pubsub.inference-objective flags. See documentation about syntax")
-	batchSize           = flag.Int("pubsub.batch-size", 10, "Number of inflight messages")
-
-	resultChannels sync.Map
-)
+var resultChannels sync.Map
 
 type TopicConfig struct {
 	SubscriberID       string            `json:"subscriber_id"`
@@ -43,14 +30,18 @@ type TopicConfig struct {
 	GateType           string            `json:"gate_type"`
 	GateParams         map[string]string `json:"gate_params,omitempty"`
 }
+
 type PubSubMQFlow struct {
+	client          *pubsub.Client
 	resultTopicID   string
 	requestChannels []RequestChannelData
 	retryChannel    chan api.RetryMessage
 	resultChannel   chan api.ResultMessage
+	cfg             config.PubSubConfig
 	gate            api.DispatchGate
 	gateFactory     api.GateFactory
 }
+
 type RequestChannelData struct {
 	requestChannel api.RequestChannel
 	subscriberID   string
@@ -61,25 +52,22 @@ type RequestChannelData struct {
 type PubSubOption func(*PubSubMQFlow)
 
 // WithGateFactory sets a GateFactory for per-topic gate instantiation.
-// When set, gates are created per topic from config, overriding any global gate.
 func WithGateFactory(factory api.GateFactory) PubSubOption {
 	return func(p *PubSubMQFlow) {
 		p.gateFactory = factory
 	}
 }
 
-func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
+func NewGCPPubSubMQFlow(cfg config.PubSubConfig, opts ...PubSubOption) *PubSubMQFlow {
 
 	ctx := context.Background()
-	var err error
-	pubSubClient, err = pubsub.NewClient(ctx, *projectID)
+	client, err := pubsub.NewClient(ctx, cfg.ProjectID)
 	if err != nil {
-		// TODO:
 		panic(err)
 	}
 	var configs []TopicConfig
-	if *topicsConfigFile != "" {
-		data, err := os.ReadFile(*topicsConfigFile)
+	if cfg.TopicsConfigFile != "" {
+		data, err := os.ReadFile(cfg.TopicsConfigFile)
 		if err != nil {
 			panic(fmt.Sprintf("failed to read topics config file: %v", err))
 		}
@@ -88,13 +76,15 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 			panic(fmt.Sprintf("failed to unmarshal topics config: %v", err))
 		}
 	} else {
-		configs = []TopicConfig{{SubscriberID: *requestSubscriberID, IGWBaseURl: *igwBaseURL, InferenceObjective: *inferenceObjective, RequestPathURL: *requestPathURL}}
+		configs = []TopicConfig{{SubscriberID: cfg.RequestSubscriberID, IGWBaseURl: cfg.IGWBaseURL, InferenceObjective: cfg.InferenceObjective, RequestPathURL: cfg.RequestPathURL}}
 	}
 	p := &PubSubMQFlow{
-		resultTopicID:   *resultTopicID,
+		client:          client,
+		resultTopicID:   cfg.ResultTopicID,
 		requestChannels: make([]RequestChannelData, 0, len(configs)),
 		retryChannel:    make(chan api.RetryMessage),
 		resultChannel:   make(chan api.ResultMessage),
+		cfg:             cfg,
 	}
 
 	// Apply functional options
@@ -103,15 +93,15 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 	}
 
 	// Create per-topic channels with gates
-	for _, cfg := range configs {
+	for _, tcfg := range configs {
 		// Determine gate for this topic
 		var gate api.DispatchGate
-		if p.gateFactory != nil && cfg.GateType != "" {
+		if p.gateFactory != nil && tcfg.GateType != "" {
 			// Use factory to create per-topic gate
 			var err error
-			gate, err = p.gateFactory.CreateGate(cfg.GateType, cfg.GateParams)
+			gate, err = p.gateFactory.CreateGate(tcfg.GateType, tcfg.GateParams)
 			if err != nil {
-				panic(fmt.Sprintf("failed to create gate for topic subscriber %q (gate_type=%q): %v", cfg.SubscriberID, cfg.GateType, err))
+				panic(fmt.Sprintf("failed to create gate for topic subscriber %q (gate_type=%q): %v", tcfg.SubscriberID, tcfg.GateType, err))
 			}
 		} else if p.gate != nil {
 			// Fall back to global gate if provided
@@ -125,12 +115,12 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 		p.requestChannels = append(p.requestChannels, RequestChannelData{
 			requestChannel: api.RequestChannel{
 				Channel:            ch,
-				IGWBaseURl:         util.NormalizeBaseURL(cfg.IGWBaseURl),
-				InferenceObjective: cfg.InferenceObjective,
-				RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
+				IGWBaseURl:         util.NormalizeBaseURL(tcfg.IGWBaseURl),
+				InferenceObjective: tcfg.InferenceObjective,
+				RequestPathURL:     util.NormalizeURLPath(tcfg.RequestPathURL),
 				Gate:               gate,
 			},
-			subscriberID: cfg.SubscriberID,
+			subscriberID: tcfg.SubscriberID,
 			gate:         gate,
 		})
 	}
@@ -143,35 +133,11 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 	return p
 }
 
-func (r *PubSubMQFlow) RetryChannel() chan api.RetryMessage {
-	return r.retryChannel
-}
-
-func (r *PubSubMQFlow) ResultChannel() chan api.ResultMessage {
-	return r.resultChannel
-}
-
-func (r *PubSubMQFlow) Characteristics() api.Characteristics {
-	return api.Characteristics{
-		HasExternalBackoff:     true,
-		SupportsMessageLatency: true,
-	}
-}
-
-func (r *PubSubMQFlow) RequestChannels() []api.RequestChannel {
-
-	var channels []api.RequestChannel
-	for _, channelData := range r.requestChannels {
-		channels = append(channels, channelData.requestChannel)
-	}
-	return channels
-}
-
 func (r *PubSubMQFlow) Start(ctx context.Context) {
 	for _, channelData := range r.requestChannels {
-		go r.requestWorker(ctx, pubSubClient, channelData.subscriberID, channelData.requestChannel.Channel, channelData.gate)
+		go r.requestWorker(ctx, r.client, channelData.subscriberID, channelData.requestChannel.Channel, channelData.gate)
 	}
-	publisher := pubSubClient.Publisher(r.resultTopicID)
+	publisher := r.client.Publisher(r.resultTopicID)
 	go resultWorker(ctx, publisher, r.resultChannel)
 
 	go addMsgToRetryQueue(ctx, r.retryChannel)
@@ -257,7 +223,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 			}
 		}()
 
-		currBatchSize := int(math.Floor(float64(*batchSize) * budget))
+		currBatchSize := int(math.Floor(float64(r.cfg.BatchSize) * budget))
 		logger.V(logutil.DEFAULT).Info("PubSub MaxOutstandingMessages", "value", currBatchSize)
 		sub.ReceiveSettings.MaxOutstandingMessages = currBatchSize
 		sub.ReceiveSettings.NumGoroutines = 1
@@ -305,4 +271,28 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 		}
 	}
 
+}
+
+func (r *PubSubMQFlow) RetryChannel() chan api.RetryMessage {
+	return r.retryChannel
+}
+
+func (r *PubSubMQFlow) ResultChannel() chan api.ResultMessage {
+	return r.resultChannel
+}
+
+func (r *PubSubMQFlow) Characteristics() api.Characteristics {
+	return api.Characteristics{
+		HasExternalBackoff:     true,
+		SupportsMessageLatency: true,
+	}
+}
+
+func (r *PubSubMQFlow) RequestChannels() []api.RequestChannel {
+
+	var channels []api.RequestChannel
+	for _, channelData := range r.requestChannels {
+		channels = append(channels, channelData.requestChannel)
+	}
+	return channels
 }

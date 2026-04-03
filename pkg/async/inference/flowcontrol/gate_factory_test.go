@@ -20,11 +20,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/llm-d-incubation/llm-d-async/pkg/config"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestGateFactory_CreateConstantGate(t *testing.T) {
-	factory := NewGateFactory("")
+	factory := NewGateFactory(config.DefaultConfig())
 	gate, err := factory.CreateGate("constant", nil)
 
 	assert.NoError(t, err)
@@ -34,7 +35,7 @@ func TestGateFactory_CreateConstantGate(t *testing.T) {
 }
 
 func TestGateFactory_UnknownGateType(t *testing.T) {
-	factory := NewGateFactory("")
+	factory := NewGateFactory(config.DefaultConfig())
 	gate, err := factory.CreateGate("unknown-type", nil)
 
 	assert.NoError(t, err)
@@ -45,7 +46,7 @@ func TestGateFactory_UnknownGateType(t *testing.T) {
 }
 
 func TestGateFactory_EmptyGateType(t *testing.T) {
-	factory := NewGateFactory("")
+	factory := NewGateFactory(config.DefaultConfig())
 	gate, err := factory.CreateGate("", nil)
 
 	assert.NoError(t, err)
@@ -55,22 +56,28 @@ func TestGateFactory_EmptyGateType(t *testing.T) {
 }
 
 func TestGateFactory_PrometheusGateWithoutURL(t *testing.T) {
-	factory := NewGateFactory("") // No Prometheus URL
+	cfg := config.DefaultConfig()
+	cfg.PrometheusURL = ""
+	factory := NewGateFactory(cfg) // No Prometheus URL
 	gate, err := factory.CreateGate("prometheus-saturation", map[string]string{})
 	assert.Error(t, err, "should return error when Prometheus URL is not set")
 	assert.Nil(t, gate)
-	assert.Contains(t, err.Error(), "prometheus-saturation gate type requires --prometheus-url flag to be set")
+	assert.Contains(t, err.Error(), "prometheus-saturation gate type requires prometheusURL to be set in config")
 }
 
 func TestGateFactory_PrometheusGateWithoutPoolParam(t *testing.T) {
-	factory := NewGateFactory("http://localhost:9090")
+	cfg := config.DefaultConfig()
+	cfg.PrometheusURL = "http://localhost:9090"
+	factory := NewGateFactory(cfg)
 	gate, err := factory.CreateGate("prometheus-saturation", map[string]string{})
 	assert.NoError(t, err, "should not error when pool parameter is missing")
 	assert.NotNil(t, gate)
 }
 
 func TestGateFactory_PrometheusGateWithInvalidThreshold(t *testing.T) {
-	factory := NewGateFactory("http://localhost:9090")
+	cfg := config.DefaultConfig()
+	cfg.PrometheusURL = "http://localhost:9090"
+	factory := NewGateFactory(cfg)
 	gate, err := factory.CreateGate("prometheus-saturation", map[string]string{
 		"threshold": "not-a-number",
 	})
@@ -80,7 +87,9 @@ func TestGateFactory_PrometheusGateWithInvalidThreshold(t *testing.T) {
 }
 
 func TestGateFactory_PrometheusGateWithInvalidFallback(t *testing.T) {
-	factory := NewGateFactory("http://localhost:9090")
+	cfg := config.DefaultConfig()
+	cfg.PrometheusURL = "http://localhost:9090"
+	factory := NewGateFactory(cfg)
 	gate, err := factory.CreateGate("prometheus-saturation", map[string]string{
 		"fallback": "not-a-number",
 	})
@@ -90,7 +99,9 @@ func TestGateFactory_PrometheusGateWithInvalidFallback(t *testing.T) {
 }
 
 func TestGateFactory_PrometheusGateWithThresholdAndFallback(t *testing.T) {
-	factory := NewGateFactory("http://localhost:9090")
+	cfg := config.DefaultConfig()
+	cfg.PrometheusURL = "http://localhost:9090"
+	factory := NewGateFactory(cfg)
 	gate, err := factory.CreateGate("prometheus-saturation", map[string]string{
 		"threshold": "0.7",
 		"fallback":  "0.3",
@@ -100,7 +111,7 @@ func TestGateFactory_PrometheusGateWithThresholdAndFallback(t *testing.T) {
 }
 
 func TestGateFactory_RedisGateMissingAddress(t *testing.T) {
-	factory := NewGateFactory("")
+	factory := NewGateFactory(config.DefaultConfig())
 	gate, err := factory.CreateGate("redis", map[string]string{})
 	assert.Error(t, err, "should return error when address is missing")
 	assert.Nil(t, gate)
@@ -108,14 +119,14 @@ func TestGateFactory_RedisGateMissingAddress(t *testing.T) {
 }
 
 func TestGateFactory_RedisGateNilParams(t *testing.T) {
-	factory := NewGateFactory("")
+	factory := NewGateFactory(config.DefaultConfig())
 	gate, err := factory.CreateGate("redis", nil)
 	assert.Error(t, err, "should return error when params is nil")
 	assert.Nil(t, gate)
 }
 
 func TestGateFactory_RedisGateSharesClient(t *testing.T) {
-	factory := NewGateFactory("")
+	factory := NewGateFactory(config.DefaultConfig())
 	params := map[string]string{"address": "localhost:6379"}
 	gate1, err1 := factory.CreateGate("redis", params)
 	gate2, err2 := factory.CreateGate("redis", params)
@@ -128,7 +139,7 @@ func TestGateFactory_RedisGateSharesClient(t *testing.T) {
 }
 
 func TestGateFactory_RedisGateDifferentAddresses(t *testing.T) {
-	factory := NewGateFactory("")
+	factory := NewGateFactory(config.DefaultConfig())
 	gate1, err1 := factory.CreateGate("redis", map[string]string{"address": "host1:6379"})
 	gate2, err2 := factory.CreateGate("redis", map[string]string{"address": "host2:6379"})
 	assert.NoError(t, err1)

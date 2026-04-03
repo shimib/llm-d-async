@@ -3,7 +3,6 @@ package redis
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"math"
 	"os"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
+	"github.com/llm-d-incubation/llm-d-async/pkg/config"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 
 	"github.com/redis/go-redis/v9"
@@ -21,22 +21,8 @@ import (
 
 const SORTEDSET_QUEUE_NAME_KEY = "queue_name"
 
-var (
-	ssIGWBaseURL         = flag.String("redis.ss.igw-base-url", "", "IGW base URL")
-	ssRequestPathURL     = flag.String("redis.ss.request-path-url", "/v1/completions", "Request path URL")
-	ssInferenceObjective = flag.String("redis.ss.inference-objective", "", "Inference objective header")
-	ssRequestQueueName   = flag.String("redis.ss.request-queue-name", "request-sortedset", "Request sorted set name")
-	ssResultQueueName    = flag.String("redis.ss.result-queue-name", "result-list", "Result list name")
-	ssQueuesConfigFile   = flag.String("redis.ss.queues-config-file", "", "Multiple queues config file")
-	ssPollIntervalMs     = flag.Int("redis.ss.poll-interval-ms", 1000, "Poll interval in milliseconds")
-	ssBatchSize          = flag.Int("redis.ss.batch-size", 10, "Number of messages to process per poll")
-	ssGateType           = flag.String("redis.ss.gate-type", "", "Gate type for single-queue mode (e.g. redis, prometheus-saturation)")
-	ssGateParamsJSON     = flag.String("redis.ss.gate-params", "{}", "JSON-encoded gate params map for single-queue mode")
-)
-
-// parseGateParams parses a JSON-encoded string (from --redis.ss.gate-params)
+// parseGateParams parses a JSON-encoded string
 // into a map[string]string for gate parameter configuration.
-// Used to pass gate parameters from CLI or YAML to the gate factory.
 func parseGateParams(s string) map[string]string {
 	m := map[string]string{}
 	if s == "" || s == "{}" {
@@ -66,8 +52,7 @@ type RedisSortedSetFlow struct {
 	requestChannels []requestChannelData
 	retryChannel    chan api.RetryMessage
 	resultChannel   chan api.ResultMessage
-	pollInterval    time.Duration
-	batchSize       int
+	cfg             config.RedisSortedSetConfig
 	gate            api.DispatchGate
 	gateFactory     api.GateFactory
 }
@@ -76,26 +61,24 @@ type RedisSortedSetFlow struct {
 type SortedSetOption func(*RedisSortedSetFlow)
 
 // WithGateFactory sets a GateFactory for per-queue gate instantiation.
-// When set, gates are created per queue from config, overriding any global gate.
 func WithGateFactory(factory api.GateFactory) SortedSetOption {
 	return func(r *RedisSortedSetFlow) {
 		r.gateFactory = factory
 	}
 }
 
-func NewRedisSortedSetFlow(opts ...SortedSetOption) *RedisSortedSetFlow {
-	configs := loadQueueConfigs()
+func NewRedisSortedSetFlow(cfg config.RedisSortedSetConfig, opts ...SortedSetOption) *RedisSortedSetFlow {
+	configs := loadQueueConfigs(cfg)
 	r := &RedisSortedSetFlow{
 		rdb: redis.NewClient(&redis.Options{
-			Addr:     *RedisAddr,
-			Username: *RedisUser,
-			Password: *RedisPassword,
+			Addr:     cfg.Conn.Addr,
+			Username: cfg.Conn.User,
+			Password: cfg.Conn.Password,
 		}),
 		requestChannels: make([]requestChannelData, 0, len(configs)),
 		retryChannel:    make(chan api.RetryMessage),
 		resultChannel:   make(chan api.ResultMessage),
-		pollInterval:    time.Duration(*ssPollIntervalMs) * time.Millisecond,
-		batchSize:       *ssBatchSize,
+		cfg:             cfg,
 	}
 
 	// Apply functional options
@@ -104,15 +87,15 @@ func NewRedisSortedSetFlow(opts ...SortedSetOption) *RedisSortedSetFlow {
 	}
 
 	// Create per-queue channels with gates
-	for _, cfg := range configs {
+	for _, qcfg := range configs {
 		// Determine gate for this queue
 		var gate api.DispatchGate
-		if r.gateFactory != nil && cfg.GateType != "" {
+		if r.gateFactory != nil && qcfg.GateType != "" {
 			// Use factory to create per-queue gate
 			var err error
-			gate, err = r.gateFactory.CreateGate(cfg.GateType, cfg.GateParams)
+			gate, err = r.gateFactory.CreateGate(qcfg.GateType, qcfg.GateParams)
 			if err != nil {
-				panic(fmt.Sprintf("failed to create gate for queue %q (gate_type=%q): %v", cfg.QueueName, cfg.GateType, err))
+				panic(fmt.Sprintf("failed to create gate for queue %q (gate_type=%q): %v", qcfg.QueueName, qcfg.GateType, err))
 			}
 		} else if r.gate != nil {
 			// Fall back to global gate if provided
@@ -124,15 +107,15 @@ func NewRedisSortedSetFlow(opts ...SortedSetOption) *RedisSortedSetFlow {
 
 		ch := api.RequestChannel{
 			Channel:            make(chan api.RequestMessage),
-			InferenceObjective: cfg.InferenceObjective,
-			RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
-			IGWBaseURl:         util.NormalizeBaseURL(cfg.IGWBaseURl),
+			InferenceObjective: qcfg.InferenceObjective,
+			RequestPathURL:     util.NormalizeURLPath(qcfg.RequestPathURL),
+			IGWBaseURl:         util.NormalizeBaseURL(qcfg.IGWBaseURl),
 			Gate:               gate,
 		}
 
 		r.requestChannels = append(r.requestChannels, requestChannelData{
 			channel:   ch,
-			queueName: cfg.QueueName,
+			queueName: qcfg.QueueName,
 			gate:      gate,
 		})
 	}
@@ -145,9 +128,9 @@ func NewRedisSortedSetFlow(opts ...SortedSetOption) *RedisSortedSetFlow {
 	return r
 }
 
-func loadQueueConfigs() []queueConfig {
-	if *ssQueuesConfigFile != "" {
-		data, err := os.ReadFile(*ssQueuesConfigFile)
+func loadQueueConfigs(cfg config.RedisSortedSetConfig) []queueConfig {
+	if cfg.QueuesConfigFile != "" {
+		data, err := os.ReadFile(cfg.QueuesConfigFile)
 		if err != nil {
 			panic(fmt.Sprintf("failed to read config file: %v", err))
 		}
@@ -159,12 +142,12 @@ func loadQueueConfigs() []queueConfig {
 	}
 	// Single-queue mode
 	return []queueConfig{{
-		QueueName:          *ssRequestQueueName,
-		InferenceObjective: *ssInferenceObjective,
-		RequestPathURL:     *ssRequestPathURL,
-		IGWBaseURl:         *ssIGWBaseURL,
-		GateType:           *ssGateType,
-		GateParams:         parseGateParams(*ssGateParamsJSON),
+		QueueName:          cfg.RequestQueueName,
+		InferenceObjective: cfg.InferenceObjective,
+		RequestPathURL:     cfg.RequestPathURL,
+		IGWBaseURl:         cfg.IGWBaseURL,
+		GateType:           cfg.GateType,
+		GateParams:         parseGateParams(cfg.GateParamsJSON),
 	}}
 }
 
@@ -199,7 +182,7 @@ func (r *RedisSortedSetFlow) Characteristics() api.Characteristics {
 // Polls sorted set and processes messages by deadline priority (earliest first)
 func (r *RedisSortedSetFlow) requestWorker(ctx context.Context, msgChannel chan api.RequestMessage, queueName string) {
 	logger := log.FromContext(ctx)
-	ticker := time.NewTicker(r.pollInterval)
+	ticker := time.NewTicker(time.Duration(r.cfg.PollIntervalMs) * time.Millisecond)
 	defer ticker.Stop()
 
 	// Find the gate for this queue
@@ -228,7 +211,7 @@ func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel cha
 	currentTime := float64(time.Now().Unix())
 
 	budget := gate.Budget(ctx)
-	batchSize := int(math.Floor(float64(r.batchSize) * budget))
+	batchSize := int(math.Floor(float64(r.cfg.BatchSize) * budget))
 
 	for i := 0; i < batchSize; i++ {
 		results, err := r.rdb.ZPopMin(ctx, queueName, 1).Result()
@@ -290,7 +273,7 @@ func (r *RedisSortedSetFlow) retryWorker(ctx context.Context) {
 		case msg := <-r.retryChannel:
 			queueName := msg.Metadata[SORTEDSET_QUEUE_NAME_KEY]
 			if queueName == "" {
-				queueName = *ssRequestQueueName
+				queueName = r.cfg.RequestQueueName
 			}
 
 			bytes, err := json.Marshal(msg.RequestMessage)
@@ -318,7 +301,7 @@ func (r *RedisSortedSetFlow) resultWorker(ctx context.Context) {
 			return
 		case msg := <-r.resultChannel:
 			// Check metadata for custom result queue (set by producer)
-			resultQueue := *ssResultQueueName // default queue
+			resultQueue := r.cfg.ResultQueueName // default queue
 			if msg.Metadata != nil {
 				if customQueue, ok := msg.Metadata["result_queue"]; ok && customQueue != "" {
 					resultQueue = customQueue

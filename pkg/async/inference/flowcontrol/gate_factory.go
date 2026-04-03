@@ -21,6 +21,7 @@ import (
 	"strconv"
 
 	asyncapi "github.com/llm-d-incubation/llm-d-async/pkg/async/api"
+	"github.com/llm-d-incubation/llm-d-async/pkg/config"
 	redisgate "github.com/llm-d-incubation/llm-d-async/pkg/redis"
 	promapi "github.com/prometheus/client_golang/api"
 	goredis "github.com/redis/go-redis/v9"
@@ -28,27 +29,19 @@ import (
 
 // GateFactory creates DispatchGate instances based on configuration.
 type GateFactory struct {
-	prometheusURL string
-	redisClients  map[string]*goredis.Client
+	cfg          *config.Config
+	redisClients map[string]*goredis.Client
 }
 
-// NewGateFactory creates a new GateFactory with an optional Prometheus URL.
-// If prometheusURL is empty, Prometheus gates will fail at creation time.
-func NewGateFactory(prometheusURL string) *GateFactory {
+// NewGateFactory creates a new GateFactory with the provided configuration.
+func NewGateFactory(cfg *config.Config) *GateFactory {
 	return &GateFactory{
-		prometheusURL: prometheusURL,
-		redisClients:  make(map[string]*goredis.Client),
+		cfg:          cfg,
+		redisClients: make(map[string]*goredis.Client),
 	}
 }
 
 // CreateGate creates a DispatchGate based on the gate type and parameters.
-// Supported gate types:
-//   - "constant": Always returns budget 1.0 (fully open)
-//   - "redis": Queries Redis for dispatch budget
-//   - "prometheus-saturation": Queries Prometheus for pool saturation metric
-//     Optional params: threshold (default 0.8), fallback (default 0.0)
-//
-// For unsupported or unknown gate types, returns ConstOpenGate as a safe default.
 func (f *GateFactory) CreateGate(gateType string, params map[string]string) (asyncapi.DispatchGate, error) {
 	switch gateType {
 	case "constant":
@@ -71,13 +64,17 @@ func (f *GateFactory) CreateGate(gateType string, params map[string]string) (asy
 		return redisgate.NewRedisDispatchGate(client, budgetKey), nil
 
 	case "prometheus-saturation":
-		if f.prometheusURL == "" {
-			return nil, fmt.Errorf("prometheus-saturation gate type requires --prometheus-url flag to be set")
+		prometheusURL := f.cfg.PrometheusURL
+		if prometheusURL == "" {
+			prometheusURL = f.cfg.Gates.Prometheus.URL
+		}
+		if prometheusURL == "" {
+			return nil, fmt.Errorf("prometheus-saturation gate type requires prometheusURL to be set in config")
 		}
 
 		pool := params["pool"]
 
-		threshold := 0.8 // default threshold
+		threshold := f.cfg.Gates.Saturation.Threshold
 		if thresholdStr := params["threshold"]; thresholdStr != "" {
 			t, err := strconv.ParseFloat(thresholdStr, 64)
 			if err != nil {
@@ -86,7 +83,7 @@ func (f *GateFactory) CreateGate(gateType string, params map[string]string) (asy
 			threshold = t
 		}
 
-		fallback := 0.0 // default fallback saturation
+		fallback := f.cfg.Gates.Saturation.Fallback
 		if fallbackStr := params["fallback"]; fallbackStr != "" {
 			fb, err := strconv.ParseFloat(fallbackStr, 64)
 			if err != nil {
@@ -97,6 +94,9 @@ func (f *GateFactory) CreateGate(gateType string, params map[string]string) (asy
 
 		queryExpr := params["query"]
 		if queryExpr == "" {
+			queryExpr = f.cfg.Gates.Saturation.QueryExpr
+		}
+		if queryExpr == "" {
 			labels := map[string]string{}
 			if pool != "" {
 				labels["inference_pool"] = pool
@@ -104,7 +104,7 @@ func (f *GateFactory) CreateGate(gateType string, params map[string]string) (asy
 			queryExpr = buildPromQL("inference_extension_flow_control_pool_saturation", labels)
 		}
 
-		source, err := NewPromQLMetricSource(promapi.Config{Address: f.prometheusURL}, queryExpr)
+		source, err := NewPromQLMetricSource(promapi.Config{Address: prometheusURL}, queryExpr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Prometheus metric source: %w", err)
 		}

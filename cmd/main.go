@@ -11,6 +11,7 @@ import (
 	"github.com/llm-d-incubation/llm-d-async/pkg/async"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/inference/flowcontrol"
+	"github.com/llm-d-incubation/llm-d-async/pkg/config"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
 	"github.com/llm-d-incubation/llm-d-async/pkg/pubsub"
 	"github.com/llm-d-incubation/llm-d-async/pkg/redis"
@@ -25,70 +26,55 @@ import (
 
 func main() {
 
-	var loggerVerbosity int
-
-	var metricsPort int
-	var metricsEndpointAuth bool
-
-	var concurrency int
-	var requestMergePolicy string
-	var messageQueueImpl string
-
-	flag.IntVar(&loggerVerbosity, "v", logging.DEFAULT, "number for the log level verbosity")
-
-	flag.IntVar(&metricsPort, "metrics-port", 9090, "The metrics port")
-	flag.BoolVar(&metricsEndpointAuth, "metrics-endpoint-auth", true, "Enables authentication and authorization of the metrics endpoint")
-
-	flag.IntVar(&concurrency, "concurrency", 8, "number of concurrent workers")
-
-	flag.StringVar(&requestMergePolicy, "request-merge-policy", "random-robin", "The request merge policy to use. Supported policies: random-robin")
-	flag.StringVar(&messageQueueImpl, "message-queue-impl", "redis-pubsub", "The message queue implementation to use. Supported implementations: redis-pubsub, redis-sortedset, gcp-pubsub, gcp-pubsub-gated")
-
-	var prometheusURL = flag.String("prometheus-url", "", "Prometheus server URL for metric-based gates (e.g., http://localhost:9090)")
+	var configFile string
+	flag.StringVar(&configFile, "config", "", "Path to the configuration file")
 
 	opts := zap.Options{
 		Development: true,
 	}
-
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	logging.InitLogging(&opts, loggerVerbosity)
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		fmt.Printf("failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	logging.InitLogging(&opts, cfg.LogLevel)
 	defer logging.Sync() // nolint:errcheck
 
 	setupLog := ctrl.Log.WithName("setup")
 	setupLog.Info("Logger initialized")
 
-	////////setupLog.Info("GIE build", "commit-sha", version.CommitSHA, "build-ref", version.BuildRef)
-
 	printAllFlags(setupLog)
 	// Create Gate Factory for per-queue gate instantiation
-	gateFactory := flowcontrol.NewGateFactory(*prometheusURL)
+	gateFactory := flowcontrol.NewGateFactory(cfg)
 
 	var policy api.RequestMergePolicy
-	switch requestMergePolicy {
+	switch cfg.RequestMergePolicy {
 	case "random-robin":
 		policy = async.NewRandomRobinPolicy()
 	default:
-		setupLog.Error(fmt.Errorf("unknown request merge policy: %s", requestMergePolicy), "Unknown request merge policy", "request-merge-policy",
-			requestMergePolicy)
+		setupLog.Error(fmt.Errorf("unknown request merge policy: %s", cfg.RequestMergePolicy), "Unknown request merge policy", "request-merge-policy",
+			cfg.RequestMergePolicy)
 		os.Exit(1)
 	}
 	var impl api.Flow
-	switch messageQueueImpl {
+	switch cfg.MessageQueueImpl {
 	case "redis-pubsub":
-		impl = redis.NewRedisMQFlow()
+		impl = redis.NewRedisMQFlow(cfg.Redis)
 	case "redis-sortedset":
-		impl = redis.NewRedisSortedSetFlow(redis.WithGateFactory(gateFactory))
+		impl = redis.NewRedisSortedSetFlow(cfg.RedisSortedSet, redis.WithGateFactory(gateFactory))
 		setupLog.Info("Using Redis sorted-set flow with per-queue gating")
 	case "gcp-pubsub":
-		impl = pubsub.NewGCPPubSubMQFlow()
+		impl = pubsub.NewGCPPubSubMQFlow(cfg.PubSub)
 	case "gcp-pubsub-gated":
-		impl = pubsub.NewGCPPubSubMQFlow(pubsub.WithGateFactory(gateFactory))
+		impl = pubsub.NewGCPPubSubMQFlow(cfg.PubSub, pubsub.WithGateFactory(gateFactory))
 		setupLog.Info("Using GCP PubSub flow with per-queue gating")
 	default:
-		setupLog.Error(fmt.Errorf("unknown message queue implementation: %s", messageQueueImpl), "Unknown message queue implementation",
-			"message-queue-impl", messageQueueImpl)
+		setupLog.Error(fmt.Errorf("unknown message queue implementation: %s", cfg.MessageQueueImpl), "Unknown message queue implementation",
+			"message-queue-impl", cfg.MessageQueueImpl)
 		os.Exit(1)
 	}
 
@@ -96,15 +82,10 @@ func main() {
 
 	ctx := ctrl.SetupSignalHandler()
 
-	// Register metrics handler.
-	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
-	// More info:
-	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/metrics/server
-	// - https://book.kubebuilder.io/reference/metrics.html
 	metricsServerOptions := metricsserver.Options{
-		BindAddress: fmt.Sprintf(":%d", metricsPort),
+		BindAddress: fmt.Sprintf(":%d", cfg.MetricsPort),
 		FilterProvider: func() func(c *rest.Config, httpClient *http.Client) (metricsserver.Filter, error) {
-			if metricsEndpointAuth {
+			if cfg.MetricsEndpointAuth {
 				return filters.WithAuthenticationAndAuthorization
 			}
 
@@ -121,7 +102,7 @@ func main() {
 	inferenceClient := api.NewHTTPInferenceClient(httpClient)
 
 	requestChannel := policy.MergeRequestChannels(impl.RequestChannels()).Channel
-	for w := 1; w <= concurrency; w++ {
+	for w := 1; w <= cfg.Concurrency; w++ {
 
 		go api.Worker(ctx, impl.Characteristics(), inferenceClient, requestChannel, impl.RetryChannel(), impl.ResultChannel())
 	}

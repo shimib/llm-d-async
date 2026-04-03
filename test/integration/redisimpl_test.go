@@ -2,7 +2,6 @@ package integration_test
 
 import (
 	"context"
-	"flag"
 	"strconv"
 	"testing"
 	"time"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
+	"github.com/llm-d-incubation/llm-d-async/pkg/config"
 	"github.com/llm-d-incubation/llm-d-async/pkg/redis"
 )
 
@@ -19,12 +19,10 @@ func TestRedisImpl(t *testing.T) {
 	rAddr := s.Host() + ":" + s.Port()
 
 	ctx := context.Background()
-	err := flag.Set("redis.addr", rAddr)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := config.DefaultConfig().Redis
+	cfg.Conn.Addr = rAddr
 
-	flow := redis.NewRedisMQFlow()
+	flow := redis.NewRedisMQFlow(cfg)
 	flow.Start(ctx)
 
 	flow.RetryChannel() <- api.RetryMessage{
@@ -75,10 +73,11 @@ func TestRedisImplWithAuth(t *testing.T) {
 	rAddr := s.Host() + ":" + s.Port()
 
 	ctx := context.Background()
-	_ = flag.Set("redis.addr", rAddr)
-	_ = flag.Set("redis.password", "test-password")
+	cfg := config.DefaultConfig().RedisSortedSet
+	cfg.Conn.Addr = rAddr
+	cfg.Conn.Password = "test-password"
 
-	flow := redis.NewRedisSortedSetFlow()
+	flow := redis.NewRedisSortedSetFlow(cfg)
 	flow.Start(ctx)
 
 	// Publish a result message
