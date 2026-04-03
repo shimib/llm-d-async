@@ -350,7 +350,7 @@ func getOrPickPort(envVar, defaultPort string) string {
 	if !usedPorts[defaultPort] {
 		l, err := net.Listen("tcp", "localhost:"+defaultPort)
 		if err == nil {
-			l.Close()
+			l.Close() //nolint:errcheck
 			usedPorts[defaultPort] = true
 			return defaultPort
 		}
@@ -362,10 +362,10 @@ func getOrPickPort(envVar, defaultPort string) string {
 			panic(fmt.Sprintf("failed to find a free port: %v", err))
 		}
 		_, port, _ := net.SplitHostPort(l.Addr().String())
-		l.Close()
+		l.Close() //nolint:errcheck
 		if !usedPorts[port] {
 			usedPorts[port] = true
-			fmt.Fprintf(ginkgo.GinkgoWriter, "Default port %s is taken or already used, picked a free one: %s for %s\n", defaultPort, port, envVar)
+			fmt.Fprintf(ginkgo.GinkgoWriter, "Default port %s is taken or already used, picked a free one: %s for %s\n", defaultPort, port, envVar) //nolint:errcheck
 			return port
 		}
 	}
