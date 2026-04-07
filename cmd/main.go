@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/llm-d-incubation/llm-d-async/pkg/async"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/inference/flowcontrol"
+	"github.com/llm-d-incubation/llm-d-async/pkg/gcs"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
 	"github.com/llm-d-incubation/llm-d-async/pkg/pubsub"
 	"github.com/llm-d-incubation/llm-d-async/pkg/redis"
@@ -87,6 +89,9 @@ func main() {
 	case "gcp-pubsub-gated":
 		impl = pubsub.NewGCPPubSubMQFlow(pubsub.WithGateFactory(gateFactory))
 		setupLog.Info("Using GCP PubSub flow with per-queue gating")
+	case "gcs":
+		impl = gcs.NewGCSMQFlow(context.Background())
+		setupLog.Info("Using GCS message queue flow")
 	default:
 		setupLog.Error(fmt.Errorf("unknown message queue implementation: %s", messageQueueImpl), "Unknown message queue implementation",
 			"message-queue-impl", messageQueueImpl)

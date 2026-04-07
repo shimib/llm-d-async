@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: async-processor-gcs
+  namespace: e2e-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: async-processor-gcs
+  template:
+    metadata:
+      labels:
+        app: async-processor-gcs
+    spec:
+      serviceAccountName: async-processor
+      containers:
+        - name: async-processor
+          image: ${AP_IMAGE}
+          imagePullPolicy: Never
+          env:
+            - name: STORAGE_EMULATOR_HOST
+              value: "gcs-mock.e2e-test.svc.cluster.local:80"
+            - name: PUBSUB_EMULATOR_HOST
+              value: "gcs-mock.e2e-test.svc.cluster.local:8085"
+          args:
+            - "--message-queue-impl=gcs"
+            - "--gcs.project-id=e2e-test-project"
+            - "--gcs.request-bucket=e2e-requests"
+            - "--gcs.result-bucket=e2e-results"
+            - "--gcs.bootstrap-prefix=new/"
+            - "--gcs.processing-prefix=processing/"
+            - "--gcs.igw-base-url=http://igw-mock.e2e-test.svc.cluster.local:80"
+            - "--gcs.poll-interval-ms=500"
+            - "--metrics-endpoint-auth=false"
+            - "--concurrency=1"
