@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
-	controllerruntime "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 const (
@@ -14,6 +13,9 @@ const (
 )
 
 var (
+	// Registry is the prometheus registry.
+	Registry = prometheus.NewRegistry()
+
 	Retries = prometheus.NewCounter(prometheus.CounterOpts{
 		Subsystem: SchedulerSubsystem, Name: "async_request_retries_total",
 		Help: "Total number of async request retries.",
@@ -62,7 +64,7 @@ var registerMetrics sync.Once
 func Register(customCollectors ...prometheus.Collector) {
 	registerMetrics.Do(func() {
 		for _, collector := range customCollectors {
-			controllerruntime.Registry.MustRegister(collector)
+			Registry.MustRegister(collector)
 		}
 	})
 }

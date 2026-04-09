@@ -21,9 +21,8 @@ import (
 	"flag"
 	"math"
 
+	"github.com/llm-d-incubation/llm-d-async/internal/logging"
 	"github.com/prometheus/client_golang/api"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 var saturationInferencePool = flag.String("gate.saturation.inference-pool", "", "inference pool name for saturation metric")
@@ -57,22 +56,22 @@ func NewSaturationMetricDispatchGateWithSource(source MetricSource, threshold fl
 // On error or missing data the gate returns the configured fallback budget.
 // The output is always clamped to [0.0, 1.0].
 func (g *SaturationMetricDispatchGate) Budget(ctx context.Context) float64 {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 
 	samples, err := g.source.Query(ctx)
 	if err != nil {
-		logger.V(logutil.DEFAULT).Info("MetricSource error, using fallback value", "fallback", g.fallback, "error", err)
+		logger.V(logging.DEFAULT).Info("MetricSource error, using fallback value", "fallback", g.fallback, "error", err)
 		return g.fallback
 	}
 
 	if len(samples) == 0 {
-		logger.V(logutil.DEFAULT).Info("No saturation metrics found, using fallback value", "fallback", g.fallback)
+		logger.V(logging.DEFAULT).Info("No saturation metrics found, using fallback value", "fallback", g.fallback)
 		return g.fallback
 	}
 
 	saturation := samples[0].Value
 	if math.IsNaN(saturation) || math.IsInf(saturation, 0) {
-		logger.V(logutil.DEFAULT).Info("Invalid saturation value, using fallback value", "fallback", g.fallback, "value", saturation)
+		logger.V(logging.DEFAULT).Info("Invalid saturation value, using fallback value", "fallback", g.fallback, "value", saturation)
 		return g.fallback
 	}
 	if saturation >= g.threshold {

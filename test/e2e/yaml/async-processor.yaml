@@ -43,7 +43,6 @@ spec:
             - "--redis.addr=redis.e2e-test.svc.cluster.local:6379"
             - "--redis.ss.poll-interval-ms=500"
             - "--redis.ss.batch-size=10"
-            - "--metrics-endpoint-auth=false"
             - "--concurrency=1"
             - "--redis.ss.gate-type=redis"
             - "--redis.ss.gate-params={\"address\":\"redis.e2e-test.svc.cluster.local:6379\"}"

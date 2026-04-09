@@ -11,11 +11,10 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub/v2"
+	"github.com/llm-d-incubation/llm-d-async/internal/logging"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 const PUBSUB_ID = "pubsub-id"
@@ -213,7 +212,7 @@ func publishPubSub(ctx context.Context, publisher *pubsub.Publisher, msg []byte,
 }
 
 func addMsgToRetryQueue(ctx context.Context, retryChannel chan api.RetryMessage) {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 
 	for {
 		select {
@@ -224,7 +223,7 @@ func addMsgToRetryQueue(ctx context.Context, retryChannel chan api.RetryMessage)
 			pubsubID := msg.RequestMessage.Metadata[PUBSUB_ID]
 			value, _ := resultChannels.Load(pubsubID)
 			resultChannel := value.(chan bool)
-			logger.V(logutil.DEBUG).Info("Retrying message", "pubsubID", pubsubID)
+			logger.V(logging.DEBUG).Info("Retrying message", "pubsubID", pubsubID)
 			resultChannel <- false
 
 		}
@@ -233,7 +232,7 @@ func addMsgToRetryQueue(ctx context.Context, retryChannel chan api.RetryMessage)
 }
 
 func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.Client, subscriberID string, ch chan api.RequestMessage, gate api.DispatchGate) {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 
 	sub := pubSubClient.Subscriber(subscriberID)
 
@@ -258,7 +257,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 		}()
 
 		currBatchSize := int(math.Floor(float64(*batchSize) * budget))
-		logger.V(logutil.DEFAULT).Info("PubSub MaxOutstandingMessages", "value", currBatchSize)
+		logger.V(logging.DEFAULT).Info("PubSub MaxOutstandingMessages", "value", currBatchSize)
 		sub.ReceiveSettings.MaxOutstandingMessages = currBatchSize
 		sub.ReceiveSettings.NumGoroutines = 1
 		if currBatchSize <= 0 {
@@ -273,7 +272,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 			var msgObj api.RequestMessage
 			err := json.Unmarshal(msg.Data, &msgObj)
 			if err != nil {
-				logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal message from request queue")
+				logger.V(logging.DEFAULT).Error(err, "Failed to unmarshal message from request queue")
 				msg.Ack()
 				return
 			}
@@ -303,7 +302,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 		cancel()
 		// TODO
 		if err != nil {
-			logger.V(logutil.DEFAULT).Error(err, "Fail to receive messages from request subscription")
+			logger.V(logging.DEFAULT).Error(err, "Fail to receive messages from request subscription")
 		}
 	}
 

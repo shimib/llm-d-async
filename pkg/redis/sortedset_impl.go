@@ -11,12 +11,11 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/llm-d-incubation/llm-d-async/internal/logging"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 
 	"github.com/redis/go-redis/v9"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 const SORTEDSET_QUEUE_NAME_KEY = "queue_name"
@@ -198,7 +197,7 @@ func (r *RedisSortedSetFlow) Characteristics() api.Characteristics {
 
 // Polls sorted set and processes messages by deadline priority (earliest first)
 func (r *RedisSortedSetFlow) requestWorker(ctx context.Context, msgChannel chan api.RequestMessage, queueName string) {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 	ticker := time.NewTicker(r.pollInterval)
 	defer ticker.Stop()
 
@@ -236,7 +235,7 @@ func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel cha
 			break
 		}
 		if err != nil {
-			logger.V(logutil.DEFAULT).Error(err, "Failed to pop from sorted set")
+			logger.V(logging.DEFAULT).Error(err, "Failed to pop from sorted set")
 			break
 		}
 
@@ -246,7 +245,7 @@ func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel cha
 		}
 
 		if deadline < currentTime {
-			logger.V(logutil.DEFAULT).Info("Deadline expired", "id", msg.Id)
+			logger.V(logging.DEFAULT).Info("Deadline expired", "id", msg.Id)
 			continue
 		}
 
@@ -266,13 +265,13 @@ func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel cha
 func (r *RedisSortedSetFlow) parseMessage(z redis.Z, logger logr.Logger) (api.RequestMessage, float64, bool) {
 	var msg api.RequestMessage
 	if err := json.Unmarshal([]byte(z.Member.(string)), &msg); err != nil {
-		logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal message")
+		logger.V(logging.DEFAULT).Error(err, "Failed to unmarshal message")
 		return msg, 0, false
 	}
 
 	deadline, err := strconv.ParseInt(msg.DeadlineUnixSec, 10, 64)
 	if err != nil {
-		logger.V(logutil.DEFAULT).Error(err, "Invalid deadline", "id", msg.Id)
+		logger.V(logging.DEFAULT).Error(err, "Invalid deadline", "id", msg.Id)
 		return msg, 0, false
 	}
 
@@ -281,7 +280,7 @@ func (r *RedisSortedSetFlow) parseMessage(z redis.Z, logger logr.Logger) (api.Re
 
 // Re-queues failed messages with exponential backoff
 func (r *RedisSortedSetFlow) retryWorker(ctx context.Context) {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 
 	for {
 		select {
@@ -295,13 +294,13 @@ func (r *RedisSortedSetFlow) retryWorker(ctx context.Context) {
 
 			bytes, err := json.Marshal(msg.RequestMessage)
 			if err != nil {
-				logger.V(logutil.DEFAULT).Error(err, "Failed to marshal retry")
+				logger.V(logging.DEFAULT).Error(err, "Failed to marshal retry")
 				continue
 			}
 
 			retryScore := float64(time.Now().Unix()) + msg.BackoffDurationSeconds
 			if err := r.rdb.ZAdd(ctx, queueName, redis.Z{Score: retryScore, Member: string(bytes)}).Err(); err != nil {
-				logger.V(logutil.DEFAULT).Error(err, "Failed to add retry")
+				logger.V(logging.DEFAULT).Error(err, "Failed to add retry")
 			}
 		}
 	}
@@ -310,7 +309,7 @@ func (r *RedisSortedSetFlow) retryWorker(ctx context.Context) {
 // Pushes results to Redis list (FIFO)
 // Routes results to the queue specified in request metadata, or default queue if not specified
 func (r *RedisSortedSetFlow) resultWorker(ctx context.Context) {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 
 	for {
 		select {
@@ -327,9 +326,9 @@ func (r *RedisSortedSetFlow) resultWorker(ctx context.Context) {
 
 			msgStr := r.marshalResult(msg)
 			if err := r.rdb.LPush(ctx, resultQueue, msgStr).Err(); err != nil {
-				logger.V(logutil.DEFAULT).Error(err, "Failed to push result", "queue", resultQueue)
+				logger.V(logging.DEFAULT).Error(err, "Failed to push result", "queue", resultQueue)
 			} else {
-				logger.V(logutil.DEBUG).Info("Pushed result to queue", "id", msg.Id, "queue", resultQueue)
+				logger.V(logging.DEBUG).Info("Pushed result to queue", "id", msg.Id, "queue", resultQueue)
 			}
 		}
 	}

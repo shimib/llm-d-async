@@ -55,12 +55,21 @@ spec:
           - --pubsub.request-path-url
           - "{{ .Values.ap.gcpPubSub.requestPathURL }}"
           {{- end }}
-          - --metrics-endpoint-auth={{ .Values.ap.metrics.secure }}
-        image: "{{ .Values.ap.image.repository }}:{{ .Values.ap.image.tag }}"
-        imagePullPolicy: "{{ .Values.ap.imagePullPolicy }}"
+          {{- if .Values.ap.metrics.enabled }}
+          - --metrics-port={{ .Values.ap.metrics.port | default 9090 }}
+          {{- if .Values.ap.metrics.authToken }}
+          - --metrics-auth-token=$(METRICS_AUTH_TOKEN)
+          {{- end }}
+          {{- end }}
+         image: "{{ .Values.ap.image.repository }}:{{ .Values.ap.image.tag }}"
+         imagePullPolicy: "{{ .Values.ap.imagePullPolicy }}"
         env:
           - name: LOG_LEVEL
             value: {{ if .Values.ap.logging }}{{ .Values.ap.logging.level | default "info" | quote }}{{ else }}"info"{{ end }}
+          {{- if .Values.ap.metrics.authToken }}
+          - name: METRICS_AUTH_TOKEN
+            value: {{ .Values.ap.metrics.authToken | quote }}
+          {{- end }}
           {{- if and .Values.ap.redis.enabled .Values.ap.redis.auth.enabled }}
           - name: REDIS_USERNAME
             valueFrom:

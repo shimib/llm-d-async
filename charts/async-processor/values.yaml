@@ -7,7 +7,7 @@ ap:
   metrics:
     enabled: true
     port: 9090
-    secure: false
+    authToken: ""
   # messageQueueImpl: "redis-sortedset" # can be "redis-sortedset", "redis-pubsub", or "gcp-pubsub"
   gcpPubSub:
     enabled: false

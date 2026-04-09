@@ -148,7 +148,7 @@ IGW_MOCK_IMG ?= e2e-igw-mock:latest
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests against a Kind cluster
 	@command -v kind >/dev/null 2>&1 || { echo "kind is not installed"; exit 1; }
-	AP_IMAGE=$(E2E_IMG) go test ./test/e2e/ -timeout 30m -v -ginkgo.v \
+	cd test/e2e && AP_IMAGE=$(E2E_IMG) go test . -timeout 30m -v -ginkgo.v \
 		$(if $(FOCUS),-ginkgo.focus="$(FOCUS)",) \
 		$(if $(SKIP),-ginkgo.skip="$(SKIP)",)
 
@@ -238,14 +238,11 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 
-## Tool Versions
-KUSTOMIZE_VERSION ?= v5.6.0
-CONTROLLER_TOOLS_VERSION ?= v0.17.2
-#ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
-ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
+# ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
+ENVTEST_VERSION ?= release-0.22
 ENVTEST_VERSION := $(ENVTEST_VERSION)
-#ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
-ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
+# ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
+ENVTEST_K8S_VERSION ?= 1.34
 ENVTEST_K8S_VERSION := $(ENVTEST_K8S_VERSION)
 GOLANGCI_LINT_VERSION ?= v1.64.5
 

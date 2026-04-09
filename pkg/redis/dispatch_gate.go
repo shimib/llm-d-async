@@ -4,9 +4,8 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/llm-d-incubation/llm-d-async/internal/logging"
 	goredis "github.com/redis/go-redis/v9"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 // RedisDispatchGate implements api.DispatchGate by reading the budget
@@ -37,14 +36,14 @@ func (g *RedisDispatchGate) Budget(ctx context.Context) float64 {
 	}
 	if err != nil {
 		// Redis error; log and fail closed.
-		logger := log.FromContext(ctx)
-		logger.V(logutil.DEFAULT).Error(err, "Failed to read dispatch gate budget from Redis")
+		logger := logging.Log
+		logger.V(logging.DEFAULT).Error(err, "Failed to read dispatch gate budget from Redis")
 		return 0.0
 	}
 	budget, err := strconv.ParseFloat(val, 64)
 	if err != nil {
-		logger := log.FromContext(ctx)
-		logger.V(logutil.DEFAULT).Error(err, "Failed to parse dispatch gate budget", "value", val)
+		logger := logging.Log
+		logger.V(logging.DEFAULT).Error(err, "Failed to parse dispatch gate budget", "value", val)
 		return 1.0
 	}
 	if budget < 0 {

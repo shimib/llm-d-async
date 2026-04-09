@@ -10,12 +10,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/llm-d-incubation/llm-d-async/internal/logging"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/api"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 	"github.com/redis/go-redis/v9"
-
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 const QUEUE_NAME_KEY = "queue_name"
@@ -123,7 +121,7 @@ func (r *RedisMQFlow) ResultChannel() chan api.ResultMessage {
 
 // Listening on the results channel and responsible for writing results into Redis.
 func resultWorker(ctx context.Context, rdb *redis.Client, resultChannel chan api.ResultMessage, resultsQueueName string) {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 	for {
 		select {
 		case <-ctx.Done():
@@ -143,7 +141,7 @@ func resultWorker(ctx context.Context, rdb *redis.Client, resultChannel chan api
 			err = publishRedis(ctx, rdb, resultsQueueName, msgStr)
 			if err != nil {
 				// Not going to retry here. Just log the error.
-				logger.V(logutil.DEFAULT).Error(err, "Failed to publish result message to Redis")
+				logger.V(logging.DEFAULT).Error(err, "Failed to publish result message to Redis")
 			}
 		}
 	}
@@ -151,7 +149,7 @@ func resultWorker(ctx context.Context, rdb *redis.Client, resultChannel chan api
 
 // pulls from Redis channel and put in the request channel
 func requestWorker(ctx context.Context, rdb *redis.Client, msgChannel chan api.RequestMessage, queueName string) {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 	sub := rdb.Subscribe(ctx, queueName)
 	defer sub.Close() // nolint:errcheck
 
@@ -166,7 +164,7 @@ func requestWorker(ctx context.Context, rdb *redis.Client, msgChannel chan api.R
 
 			err := json.Unmarshal([]byte(rmsg.Payload), &msg)
 			if err != nil {
-				logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal message from request channel")
+				logger.V(logging.DEFAULT).Error(err, "Failed to unmarshal message from request channel")
 				continue // skip this message
 
 			}
@@ -189,7 +187,7 @@ func (r *RedisMQFlow) Characteristics() api.Characteristics {
 
 // Puts msgs from the retry channel into a Redis sorted-set with a duration Score.
 func addMsgToRetryWorker(ctx context.Context, rdb *redis.Client, retryChannel chan api.RetryMessage, sortedSetName string) {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 	for {
 		select {
 		case <-ctx.Done():
@@ -199,7 +197,7 @@ func addMsgToRetryWorker(ctx context.Context, rdb *redis.Client, retryChannel ch
 			score := float64(time.Now().Unix()) + msg.BackoffDurationSeconds
 			bytes, err := json.Marshal(msg.RequestMessage)
 			if err != nil {
-				logger.V(logutil.DEFAULT).Error(err, "Failed to marshal message for retry in Redis")
+				logger.V(logging.DEFAULT).Error(err, "Failed to marshal message for retry in Redis")
 				continue // skip this message.
 			}
 			err = rdb.ZAdd(ctx, sortedSetName, redis.Z{
@@ -209,7 +207,7 @@ func addMsgToRetryWorker(ctx context.Context, rdb *redis.Client, retryChannel ch
 
 			if err != nil {
 				// skip this message. We're not going to retry a "preparing to retry" step.
-				logger.V(logutil.DEFAULT).Error(err, "Failed to add message for retry in Redis")
+				logger.V(logging.DEFAULT).Error(err, "Failed to add message for retry in Redis")
 			}
 		}
 	}
@@ -266,10 +264,10 @@ func (r *RedisMQFlow) retryWorker(ctx context.Context, rdb *redis.Client) {
 }
 
 func publishRedis(ctx context.Context, rdb *redis.Client, channelId, msg string) error {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 	err := rdb.Publish(ctx, channelId, msg).Err()
 	if err != nil {
-		logger.V(logutil.DEFAULT).Error(err, "Error publishing message:%s\n", err.Error())
+		logger.V(logging.DEFAULT).Error(err, "Error publishing message:%s\n", err.Error())
 		return err
 	}
 	return nil

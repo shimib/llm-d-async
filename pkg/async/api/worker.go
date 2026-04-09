@@ -10,9 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/llm-d-incubation/llm-d-async/internal/logging"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 var baseDelaySeconds = 2
@@ -20,11 +19,11 @@ var baseDelaySeconds = 2
 func Worker(ctx context.Context, characteristics Characteristics, client InferenceClient, requestChannel chan EmbelishedRequestMessage,
 	retryChannel chan RetryMessage, resultChannel chan ResultMessage) {
 
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 	for {
 		select {
 		case <-ctx.Done():
-			logger.V(logutil.DEFAULT).Info("Worker finishing.")
+			logger.V(logging.DEFAULT).Info("Worker finishing.")
 			return
 		case msg := <-requestChannel:
 			if msg.RetryCount == 0 {
@@ -38,7 +37,7 @@ func Worker(ctx context.Context, characteristics Characteristics, client Inferen
 
 			// Using a function object for easy boundaries for 'return' and 'defer'!
 			sendInferenceRequest := func() {
-				logger.V(logutil.DEBUG).Info("Sending inference request: " + msg.RequestURL)
+				logger.V(logging.DEBUG).Info("Sending inference request: " + msg.RequestURL)
 				responseBody, err := client.SendRequest(ctx, msg.RequestURL, msg.HttpHeaders, payloadBytes)
 
 				if err == nil {

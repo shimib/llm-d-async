@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/llm-d-incubation/llm-d-async/internal/logging"
@@ -15,13 +19,7 @@ import (
 	"github.com/llm-d-incubation/llm-d-async/pkg/pubsub"
 	"github.com/llm-d-incubation/llm-d-async/pkg/redis"
 	"github.com/llm-d-incubation/llm-d-async/pkg/version"
-	"k8s.io/client-go/rest"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-
-	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-
-	ctrl "sigs.k8s.io/controller-runtime"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -29,7 +27,7 @@ func main() {
 	var loggerVerbosity int
 
 	var metricsPort int
-	var metricsEndpointAuth bool
+	var metricsAuthToken string
 
 	var concurrency int
 	var requestMergePolicy string
@@ -38,7 +36,7 @@ func main() {
 	flag.IntVar(&loggerVerbosity, "v", logging.DEFAULT, "number for the log level verbosity")
 
 	flag.IntVar(&metricsPort, "metrics-port", 9090, "The metrics port")
-	flag.BoolVar(&metricsEndpointAuth, "metrics-endpoint-auth", true, "Enables authentication and authorization of the metrics endpoint")
+	flag.StringVar(&metricsAuthToken, "metrics-auth-token", "", "The Bearer token for metrics endpoint authentication (disabled if empty)")
 
 	flag.IntVar(&concurrency, "concurrency", 8, "number of concurrent workers")
 
@@ -47,7 +45,7 @@ func main() {
 
 	var prometheusURL = flag.String("prometheus-url", "", "Prometheus server URL for metric-based gates (e.g., http://localhost:9090)")
 
-	opts := zap.Options{
+	opts := logging.Options{
 		Development: true,
 	}
 
@@ -57,7 +55,7 @@ func main() {
 	logging.InitLogging(&opts, loggerVerbosity)
 	defer logging.Sync() // nolint:errcheck
 
-	setupLog := ctrl.Log.WithName("setup")
+	setupLog := logging.Log.WithName("setup")
 	setupLog.Info("Logger initialized")
 
 	setupLog.Info("Async Processor starting", "version", version.Version, "commit", version.Commit, "buildDate", version.BuildDate)
@@ -95,28 +93,37 @@ func main() {
 
 	metrics.Register(metrics.GetAsyncProcessorCollectors(impl.Characteristics().SupportsMessageLatency)...)
 
-	ctx := ctrl.SetupSignalHandler()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// Register metrics handler.
-	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
-	// More info:
-	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/metrics/server
-	// - https://book.kubebuilder.io/reference/metrics.html
-	metricsServerOptions := metricsserver.Options{
-		BindAddress: fmt.Sprintf(":%d", metricsPort),
-		FilterProvider: func() func(c *rest.Config, httpClient *http.Client) (metricsserver.Filter, error) {
-			if metricsEndpointAuth {
-				return filters.WithAuthenticationAndAuthorization
-			}
-
-			return nil
-		}(),
+	mux := http.NewServeMux()
+	metricsHandler := promhttp.HandlerFor(metrics.Registry, promhttp.HandlerOpts{})
+	if metricsAuthToken != "" {
+		setupLog.Info("Metrics authentication enabled")
+		metricsHandler = withAuth(metricsAuthToken, metricsHandler)
 	}
-	restConfig := ctrl.GetConfigOrDie()
-	httpClient := http.DefaultClient
+	mux.Handle("/metrics", metricsHandler)
+	metricsServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", metricsPort),
+		Handler: mux,
+	}
+	go func() {
+		setupLog.Info("Starting metrics server", "addr", metricsServer.Addr)
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			setupLog.Error(err, "Failed to start metrics server")
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			setupLog.Error(err, "Failed to shutdown metrics server")
+		}
+	}()
 
-	msrv, _ := metricsserver.NewServer(metricsServerOptions, restConfig, httpClient)
-	go msrv.Start(ctx) // nolint:errcheck
+	httpClient := http.DefaultClient
 
 	// Create inference client
 	inferenceClient := api.NewHTTPInferenceClient(httpClient)
@@ -137,4 +144,15 @@ func printAllFlags(setupLog logr.Logger) {
 		flags[f.Name] = f.Value
 	})
 	setupLog.Info("Flags processed", "flags", flags)
+}
+
+func withAuth(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "Bearer "+token {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

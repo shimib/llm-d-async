@@ -24,12 +24,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/llm-d-incubation/llm-d-async/internal/logging"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 	"golang.org/x/oauth2/google"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 // Sample represents a single metric sample with its labels and value.
@@ -111,14 +110,14 @@ func buildPromQL(metricName string, labels map[string]string) string {
 
 // Query executes the preconfigured PromQL expression and returns the result as samples.
 func (s *PromQLMetricSource) Query(ctx context.Context) ([]Sample, error) {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 
 	result, warnings, err := s.api.Query(ctx, s.expr, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("error querying Prometheus: %w", err)
 	}
 	if len(warnings) > 0 {
-		logger.V(logutil.DEFAULT).Info("Prometheus query returned warnings", "warnings", warnings)
+		logger.V(logging.DEFAULT).Info("Prometheus query returned warnings", "warnings", warnings)
 	}
 
 	vec, ok := result.(model.Vector)

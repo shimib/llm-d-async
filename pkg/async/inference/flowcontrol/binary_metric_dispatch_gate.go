@@ -20,9 +20,8 @@ import (
 	"context"
 	"flag"
 
+	"github.com/llm-d-incubation/llm-d-async/internal/logging"
 	"github.com/prometheus/client_golang/api"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 var isGMP = flag.Bool("gate.pmetric.is-gmp", false, "Is this GMP (Google Managed Prometheus).")
@@ -46,16 +45,16 @@ func NewBinaryMetricDispatchGateWithSource(source MetricSource) *BinaryMetricDis
 
 // Budget implements DispatchGate.
 func (g *BinaryMetricDispatchGate) Budget(ctx context.Context) float64 {
-	logger := log.FromContext(ctx)
+	logger := logging.Log
 
 	samples, err := g.source.Query(ctx)
 	if err != nil {
-		logger.V(logutil.DEFAULT).Info("MetricSource error, failing open", "error", err)
+		logger.V(logging.DEFAULT).Info("MetricSource error, failing open", "error", err)
 		return 1.0
 	}
 
 	if len(samples) == 0 {
-		logger.V(logutil.DEFAULT).Info("No metrics found, failing open")
+		logger.V(logging.DEFAULT).Info("No metrics found, failing open")
 		return 1.0
 	}
 
