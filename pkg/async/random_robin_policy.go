@@ -16,7 +16,7 @@ type RandomRobinPolicy struct {
 }
 
 func (r *RandomRobinPolicy) MergeRequestChannels(channels []api.RequestChannel) api.EmbelishedRequestChannel {
-	mergedChannel := make(chan api.EmbelishedRequestMessage)
+	mergedChannel := make(chan api.EmbelishedRequestMessage, len(channels))
 
 	cases := make([]reflect.SelectCase, len(channels)) //nolint:staticcheck
 	for i, ch := range channels {
