@@ -50,3 +50,4 @@ spec:
             - "--redis.ss.result-queue-name=budget-result-list"
             - "--metrics-endpoint-auth=false"
             - "--concurrency=1"
+            - "--prometheus-cache-ttl=0s"

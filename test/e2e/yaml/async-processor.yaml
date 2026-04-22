@@ -47,3 +47,4 @@ spec:
             - "--concurrency=1"
             - "--redis.ss.gate-type=redis"
             - "--redis.ss.gate-params={\"address\":\"redis.e2e-test.svc.cluster.local:6379\"}"
+            - "--prometheus-cache-ttl=0s"

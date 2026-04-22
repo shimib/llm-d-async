@@ -19,9 +19,17 @@ package flowcontrol
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestGateFactory_WithCacheTTL(t *testing.T) {
+	ttl := 10 * time.Second
+	factory := NewGateFactoryWithCacheTTL("http://localhost:9090", ttl)
+	assert.Equal(t, "http://localhost:9090", factory.prometheusURL)
+	assert.Equal(t, ttl, factory.cacheTTL)
+}
 
 func TestGateFactory_CreateConstantGate(t *testing.T) {
 	factory := NewGateFactory("")
