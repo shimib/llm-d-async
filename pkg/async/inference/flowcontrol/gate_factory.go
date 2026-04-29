@@ -89,6 +89,48 @@ func (f *GateFactory) CreateGate(gateType string, params map[string]string) (asy
 		}
 		return redisgate.NewRedisDispatchGate(client, budgetKey), nil
 
+	case "redis-quota":
+		addr := params["address"]
+		if addr == "" {
+			return nil, fmt.Errorf("redis-quota gate requires an 'address' in gate_params")
+		}
+		client, ok := f.redisClients[addr]
+		if !ok {
+			client = goredis.NewClient(&goredis.Options{Addr: addr})
+			f.redisClients[addr] = client
+		}
+
+		attr := params["attribute"]
+		if attr == "" {
+			attr = "userid"
+		}
+
+		mode := redisgate.QuotaMode(params["mode"])
+		if mode == "" {
+			mode = redisgate.QuotaModeRateLimit
+		}
+
+		limit, err := strconv.Atoi(params["limit"])
+		if err != nil {
+			return nil, fmt.Errorf("redis-quota gate requires a valid 'limit': %w", err)
+		}
+
+		windowStr := params["window"]
+		if windowStr == "" {
+			windowStr = "1m"
+		}
+		window, err := time.ParseDuration(windowStr)
+		if err != nil {
+			return nil, fmt.Errorf("redis-quota gate requires a valid 'window' duration: %w", err)
+		}
+
+		prefix := params["prefix"]
+		if prefix == "" {
+			prefix = "quota:"
+		}
+
+		return redisgate.NewRedisQuotaGate(client, attr, mode, limit, window, prefix), nil
+
 	case "prometheus-saturation":
 		if f.prometheusURL == "" {
 			return nil, fmt.Errorf("prometheus-saturation gate type requires --prometheus-url flag to be set")

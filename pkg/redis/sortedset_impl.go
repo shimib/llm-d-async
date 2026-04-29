@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -72,6 +73,7 @@ type RedisSortedSetFlow struct {
 	batchSize       int
 	gate            api.DispatchGate
 	gateFactory     api.GateFactory
+	activeReleases  sync.Map
 }
 
 // SortedSetOption is a functional option for configuring RedisSortedSetFlow
@@ -257,9 +259,35 @@ func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel cha
 		}
 		msg.Metadata[SORTEDSET_QUEUE_NAME_KEY] = queueName
 
+		// Per-attribute gating
+		var release func()
+		if attrGate, ok := gate.(api.AttributeGate); ok {
+			allowed, rel, err := attrGate.Acquire(ctx, msg.Metadata)
+			if err != nil {
+				logger.V(logutil.DEFAULT).Error(err, "Failed to acquire attribute quota")
+				// Re-enqueue the message if acquisition fails
+				member, _ := json.Marshal(msg)
+				r.rdb.ZAdd(ctx, queueName, redis.Z{Score: deadline, Member: string(member)})
+				continue
+			}
+			if !allowed {
+				// Re-enqueue the message (wait for quota)
+				member, _ := json.Marshal(msg)
+				r.rdb.ZAdd(ctx, queueName, redis.Z{Score: deadline, Member: string(member)})
+				continue
+			}
+			release = rel
+		} else {
+			release = func() {}
+		}
+
 		select {
 		case msgChannel <- msg:
+			if release != nil {
+				r.activeReleases.Store(msg.Id, release)
+			}
 		case <-ctx.Done():
+			release()
 			return
 		}
 	}
@@ -367,6 +395,12 @@ func (r *RedisSortedSetFlow) flushRetryBatch(ctx context.Context, batch []api.Re
 func (r *RedisSortedSetFlow) resultWorker(ctx context.Context) {
 	processMsg := func(flushCtx context.Context, msg api.ResultMessage) {
 		batch := drainBatch(msg, r.resultChannel, maxBatchSize)
+		// Release quota for all messages in the batch
+		for _, m := range batch {
+			if rel, ok := r.activeReleases.LoadAndDelete(m.Id); ok {
+				rel.(func())()
+			}
+		}
 		r.flushResultBatch(flushCtx, batch)
 	}
 

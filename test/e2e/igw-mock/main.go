@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 )
 
 type failConfig struct {
@@ -14,10 +15,15 @@ type failConfig struct {
 	Count  int `json:"count"`
 }
 
+type delayConfig struct {
+	DelayMs int `json:"delay_ms"`
+}
+
 type server struct {
 	mu         sync.Mutex
 	requestLog []string
 	fail       failConfig
+	delay      delayConfig
 }
 
 func main() {
@@ -28,6 +34,7 @@ func main() {
 
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("/admin/fail-next", s.handleFailNext)
+	adminMux.HandleFunc("/admin/delay", s.handleDelay)
 	adminMux.HandleFunc("/admin/request-log", s.handleRequestLog)
 	adminMux.HandleFunc("/admin/reset", s.handleReset)
 
@@ -73,16 +80,25 @@ func (s *server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.requestLog = append(s.requestLog, reqID)
-
+	
+	delayMs := s.delay.DelayMs
+	
 	if s.fail.Count > 0 {
 		status := s.fail.Status
 		s.fail.Count--
 		s.mu.Unlock()
+		if delayMs > 0 {
+			time.Sleep(time.Duration(delayMs) * time.Millisecond)
+		}
 		w.WriteHeader(status)
 		fmt.Fprintf(w, `{"error":"injected failure","status":%d}`, status)
 		return
 	}
 	s.mu.Unlock()
+
+	if delayMs > 0 {
+		time.Sleep(time.Duration(delayMs) * time.Millisecond)
+	}
 
 	resp := map[string]any{
 		"id":     reqID,
@@ -106,6 +122,26 @@ func (s *server) handleFailNext(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.fail = fc
+	s.mu.Unlock()
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, `{"status":"ok"}`)
+}
+
+func (s *server) handleDelay(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var dc delayConfig
+	if err := json.NewDecoder(r.Body).Decode(&dc); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	s.delay = dc
 	s.mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
@@ -136,6 +172,7 @@ func (s *server) handleReset(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.requestLog = nil
 	s.fail = failConfig{}
+	s.delay = delayConfig{}
 	s.mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)

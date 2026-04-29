@@ -43,6 +43,8 @@ const (
 	asyncProcessorSaturationManifest = "./yaml/async-processor-saturation.yaml"
 	// asyncProcessorBudgetManifest is the manifest for the budget-gated async-processor.
 	asyncProcessorBudgetManifest = "./yaml/async-processor-budget.yaml"
+	// asyncProcessorQuotaManifest is the manifest for the quota-gated async-processor.
+	asyncProcessorQuotaManifest = "./yaml/async-processor-quota.yaml"
 )
 
 var (
@@ -65,6 +67,7 @@ var (
 	asyncProcessorObjects           []string
 	asyncProcessorSaturationObjects []string
 	asyncProcessorBudgetObjects     []string
+	asyncProcessorQuotaObjects      []string
 	createdNameSpace                bool
 
 	rdb         *redis.Client
@@ -228,15 +231,50 @@ func applyManifests() {
 		"${AP_IMAGE}": apImage,
 	})
 	asyncProcessorSaturationObjects = testutils.CreateObjsFromYaml(testConfig, apSatYamls)
+ginkgo.By("Applying async-processor-budget manifest")
+apBudgetYamls := testutils.ReadYaml(asyncProcessorBudgetManifest)
+apBudgetYamls = substituteMany(apBudgetYamls, map[string]string{
+	"${AP_IMAGE}": apImage,
+})
+asyncProcessorBudgetObjects = testutils.CreateObjsFromYaml(testConfig, apBudgetYamls)
 
-	ginkgo.By("Applying async-processor-budget manifest")
-	apBudgetYamls := testutils.ReadYaml(asyncProcessorBudgetManifest)
-	apBudgetYamls = substituteMany(apBudgetYamls, map[string]string{
-		"${AP_IMAGE}": apImage,
-	})
-	asyncProcessorBudgetObjects = testutils.CreateObjsFromYaml(testConfig, apBudgetYamls)
+ginkgo.By("Applying async-processor-quota manifest")
+apQuotaYamls := testutils.ReadYaml(asyncProcessorQuotaManifest)
+apQuotaYamls = substituteMany(apQuotaYamls, map[string]string{
+	"${AP_IMAGE}": apImage,
+})
+asyncProcessorQuotaObjects = testutils.CreateObjsFromYaml(testConfig, apQuotaYamls)
+}
+func applyManifest(path string) []string {
+yamls := testutils.ReadYaml(path)
+yamls = substituteMany(yamls, map[string]string{
+	"${AP_IMAGE}": apImage,
+})
+return testutils.CreateObjsFromYaml(testConfig, yamls)
 }
 
+func deleteObjects(objs []string) {
+for _, obj := range objs {
+	parts := strings.Split(obj, "/")
+	if len(parts) != 2 {
+		continue
+	}
+	kind := strings.ToLower(parts[0])
+	name := parts[1]
+	cmd := exec.Command("kubectl", "delete", kind, name, "-n", nsName, "--ignore-not-found")
+	_ = cmd.Run()
+}
+}
+
+func waitForReady(objs []string) {
+for _, obj := range objs {
+	if strings.HasPrefix(obj, "Deployment/") {
+		name := strings.TrimPrefix(obj, "Deployment/")
+		cmd := exec.Command("kubectl", "wait", "--for=condition=available", "--timeout=60s", "deployment", name, "-n", nsName)
+		_ = cmd.Run()
+	}
+}
+}
 func setupRedisClient() {
 	adminURL = "http://localhost:" + adminPort
 	promMockURL = "http://localhost:" + promMockPort

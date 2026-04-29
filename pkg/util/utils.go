@@ -2,6 +2,9 @@ package util
 
 // Make sure it starts with '/'
 func NormalizeURLPath(path string) string {
+	if len(path) == 0 {
+		return "/"
+	}
 	if path[0] != '/' {
 		path = "/" + path
 	}

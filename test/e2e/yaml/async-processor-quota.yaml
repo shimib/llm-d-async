@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: async-processor-quota-config
+  namespace: e2e-test
+data:
+  queues.json: |
+    [
+      {
+        "queue_name": "quota-request-sortedset",
+        "igw_base_url": "http://igw-mock.e2e-test.svc.cluster.local:80",
+        "request_path_url": "/v1/completions",
+        "gate_type": "redis-quota",
+        "gate_params": {
+          "address": "redis.e2e-test.svc.cluster.local:6379",
+          "attribute": "userid",
+          "mode": "concurrency",
+          "limit": "1"
+        }
+      }
+    ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: async-processor-quota
+  namespace: e2e-test
+  labels:
+    app: async-processor-quota
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: async-processor-quota
+  template:
+    metadata:
+      labels:
+        app: async-processor-quota
+    spec:
+      serviceAccountName: async-processor
+      containers:
+      - name: async-processor
+        image: ${AP_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - --message-queue-impl=redis-sortedset
+        - --redis.addr=redis.e2e-test.svc.cluster.local:6379
+        - --redis.ss.queues-config-file=/etc/config/queues.json
+        - --metrics-endpoint-auth=false
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/config
+      volumes:
+      - name: config-volume
+        configMap:
+          name: async-processor-quota-config
+

@@ -89,8 +89,8 @@ func resetMock(adminURL string) {
 }
 
 func setMockFailures(adminURL string, status, count int) {
-	body, _ := json.Marshal(map[string]int{"status": status, "count": count})
-	req, err := http.NewRequest(http.MethodPost, adminURL+"/admin/fail-next", bytes.NewReader(body))
+	body := fmt.Sprintf(`{"status":%d,"count":%d}`, status, count)
+	req, err := http.NewRequest(http.MethodPost, adminURL+"/admin/fail-next", bytes.NewBufferString(body))
 	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := adminClient.Do(req)
@@ -98,6 +98,18 @@ func setMockFailures(adminURL string, status, count int) {
 	defer resp.Body.Close() //nolint:errcheck
 	gomega.ExpectWithOffset(1, resp.StatusCode).To(gomega.Equal(http.StatusOK))
 }
+
+func setMockDelay(adminURL string, delayMs int) {
+	body := fmt.Sprintf(`{"delay_ms":%d}`, delayMs)
+	req, err := http.NewRequest(http.MethodPost, adminURL+"/admin/delay", bytes.NewBufferString(body))
+	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := adminClient.Do(req)
+	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
+	defer resp.Body.Close() //nolint:errcheck
+	gomega.ExpectWithOffset(1, resp.StatusCode).To(gomega.Equal(http.StatusOK))
+}
+
 
 func getRequestLog(adminURL string) []string {
 	req, err := http.NewRequest(http.MethodGet, adminURL+"/admin/request-log", nil)

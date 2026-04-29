@@ -278,40 +278,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 			cancel()
 			continue
 		}
-		err := sub.Receive(receiveCtx, func(ctx context.Context, msg *pubsub.Message) {
-
-			deliveryAttempt := msg.DeliveryAttempt
-
-			var msgObj api.RequestMessage
-			err := json.Unmarshal(msg.Data, &msgObj)
-			if err != nil {
-				logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal message from request queue")
-				msg.Ack()
-				return
-			}
-
-			resultsChannel := make(chan bool, 1)
-			resultChannels.Store(msg.ID, resultsChannel)
-			defer resultChannels.Delete(msg.ID)
-
-			if msgObj.Metadata == nil {
-				msgObj.Metadata = make(map[string]string)
-			}
-			msgObj.Metadata[PUBSUB_ID] = msg.ID
-			if deliveryAttempt != nil {
-				msgObj.RetryCount = *deliveryAttempt - 1
-			}
-
-			ch <- msgObj
-
-			result := <-resultsChannel
-			if !result {
-				msg.Nack()
-			} else {
-				metrics.MessageLatencyTime.Observe(float64(time.Since(msg.PublishTime).Milliseconds()))
-				msg.Ack()
-			}
-		})
+		err := r.processMessages(receiveCtx, sub.Receive, ch, gate)
 		cancel()
 		// TODO
 		if err != nil {
@@ -319,4 +286,63 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 		}
 	}
 
+}
+
+type receiveFunc func(context.Context, func(context.Context, *pubsub.Message)) error
+
+func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc, ch chan api.RequestMessage, gate api.DispatchGate) error {
+	logger := log.FromContext(ctx)
+	return receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
+
+		deliveryAttempt := msg.DeliveryAttempt
+
+		var msgObj api.RequestMessage
+		err := json.Unmarshal(msg.Data, &msgObj)
+		if err != nil {
+			logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal message from request queue")
+			msg.Ack()
+			return
+		}
+
+		resultsChannel := make(chan bool, 1)
+		resultChannels.Store(msg.ID, resultsChannel)
+		defer resultChannels.Delete(msg.ID)
+
+		if msgObj.Metadata == nil {
+			msgObj.Metadata = make(map[string]string)
+		}
+		msgObj.Metadata[PUBSUB_ID] = msg.ID
+		if deliveryAttempt != nil {
+			msgObj.RetryCount = *deliveryAttempt - 1
+		}
+
+		// Per-attribute gating
+		var release func()
+		if attrGate, ok := gate.(api.AttributeGate); ok {
+			allowed, rel, err := attrGate.Acquire(ctx, msg.Attributes)
+			if err != nil {
+				logger.V(logutil.DEFAULT).Error(err, "Failed to acquire attribute quota")
+				msg.Nack()
+				return
+			}
+			if !allowed {
+				msg.Nack()
+				return
+			}
+			release = rel
+		} else {
+			release = func() {}
+		}
+		defer release()
+
+		ch <- msgObj
+
+		result := <-resultsChannel
+		if !result {
+			msg.Nack()
+		} else {
+			metrics.MessageLatencyTime.Observe(float64(time.Since(msg.PublishTime).Milliseconds()))
+			msg.Ack()
+		}
+	})
 }

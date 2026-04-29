@@ -36,6 +36,14 @@ type DispatchGate interface {
 	Budget(ctx context.Context) float64
 }
 
+// AttributeGate defines the interface to determine if a request is allowed based on its attributes.
+type AttributeGate interface {
+	// Acquire attempts to acquire quota for the given attributes.
+	// Returns allowed=true if successful, and a release function to be called when processing is complete.
+	// If the gate does not support the given attributes or is not a quota gate, it should return true, nil, nil.
+	Acquire(ctx context.Context, attributes map[string]string) (allowed bool, release func(), err error)
+}
+
 // GateFactory defines the interface for creating DispatchGate instances.
 type GateFactory interface {
 	CreateGate(gateType string, params map[string]string) (DispatchGate, error)
