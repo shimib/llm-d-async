@@ -42,7 +42,7 @@ spec:
             - "--prometheus-url=http://prom-mock.e2e-test.svc.cluster.local:9090"
             - "--prometheus-cache-ttl=0s"
             - "--redis.ss.gate-type=prometheus-budget"
-            - "--redis.ss.gate-params={\"pool\":\"e2e-pool\",\"max_sys\":\"100\",\"baseline\":\"0.05\"}"
+            - "--redis.ss.gate-params={\"pool\":\"e2e-pool\",\"max_concurrency\":\"10\",\"baseline\":\"0.05\"}"
             - "--redis.ss.igw-base-url=http://igw-mock.e2e-test.svc.cluster.local:80"
             - "--redis.addr=redis.e2e-test.svc.cluster.local:6379"
             - "--redis.ss.poll-interval-ms=500"
@@ -51,3 +51,4 @@ spec:
             - "--redis.ss.result-queue-name=budget-result-list"
             - "--metrics-endpoint-auth=false"
             - "--concurrency=1"
+            - "--prometheus-cache-ttl=0s"

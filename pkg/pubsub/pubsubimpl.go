@@ -12,13 +12,12 @@ import (
 
 	"cloud.google.com/go/pubsub/v2"
 	"github.com/llm-d-incubation/llm-d-async/api"
+	"github.com/llm-d-incubation/llm-d-async/pipeline"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
-
-const PUBSUB_ID = "pubsub-id"
 
 var pubSubClient *pubsub.Client
 
@@ -44,20 +43,20 @@ type TopicConfig struct {
 	GateParams         map[string]string `json:"gate_params,omitempty"`
 }
 
-var _ api.Flow = (*PubSubMQFlow)(nil)
+var _ pipeline.Flow = (*PubSubMQFlow)(nil)
 
 type PubSubMQFlow struct {
 	resultTopicID   string
 	requestChannels []RequestChannelData
-	retryChannel    chan api.RetryMessage
+	retryChannel    chan pipeline.RetryMessage
 	resultChannel   chan api.ResultMessage
-	gate            api.DispatchGate
-	gateFactory     api.GateFactory
+	gate            pipeline.DispatchGate
+	gateFactory     pipeline.GateFactory
 }
 type RequestChannelData struct {
-	requestChannel api.RequestChannel
+	requestChannel pipeline.RequestChannel
 	subscriberID   string
-	gate           api.DispatchGate
+	gate           pipeline.DispatchGate
 }
 
 // PubSubOption is a functional option for configuring PubSubMQFlow
@@ -65,7 +64,7 @@ type PubSubOption func(*PubSubMQFlow)
 
 // WithGateFactory sets a GateFactory for per-topic gate instantiation.
 // When set, gates are created per topic from config, overriding any global gate.
-func WithGateFactory(factory api.GateFactory) PubSubOption {
+func WithGateFactory(factory pipeline.GateFactory) PubSubOption {
 	return func(p *PubSubMQFlow) {
 		p.gateFactory = factory
 	}
@@ -96,7 +95,7 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 	p := &PubSubMQFlow{
 		resultTopicID:   *resultTopicID,
 		requestChannels: make([]RequestChannelData, 0, len(configs)),
-		retryChannel:    make(chan api.RetryMessage),
+		retryChannel:    make(chan pipeline.RetryMessage),
 		resultChannel:   make(chan api.ResultMessage),
 	}
 
@@ -108,7 +107,7 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 	// Create per-topic channels with gates
 	for _, cfg := range configs {
 		// Determine gate for this topic
-		var gate api.DispatchGate
+		var gate pipeline.DispatchGate
 		if p.gateFactory != nil && cfg.GateType != "" {
 			// Use factory to create per-topic gate
 			var err error
@@ -121,12 +120,12 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 			gate = p.gate
 		} else {
 			// Default to always-open gate
-			gate = api.ConstOpenGate()
+			gate = pipeline.ConstOpenGate()
 		}
 
-		ch := make(chan api.RequestMessage)
+		ch := make(chan *api.InternalRequest)
 		p.requestChannels = append(p.requestChannels, RequestChannelData{
-			requestChannel: api.RequestChannel{
+			requestChannel: pipeline.RequestChannel{
 				Channel:            ch,
 				IGWBaseURl:         util.NormalizeBaseURL(cfg.IGWBaseURl),
 				InferenceObjective: cfg.InferenceObjective,
@@ -140,13 +139,13 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 
 	// Set default gate if not already set
 	if p.gate == nil {
-		p.gate = api.ConstOpenGate()
+		p.gate = pipeline.ConstOpenGate()
 	}
 
 	return p
 }
 
-func (r *PubSubMQFlow) RetryChannel() chan api.RetryMessage {
+func (r *PubSubMQFlow) RetryChannel() chan pipeline.RetryMessage {
 	return r.retryChannel
 }
 
@@ -154,16 +153,16 @@ func (r *PubSubMQFlow) ResultChannel() chan api.ResultMessage {
 	return r.resultChannel
 }
 
-func (r *PubSubMQFlow) Characteristics() api.Characteristics {
-	return api.Characteristics{
+func (r *PubSubMQFlow) Characteristics() pipeline.Characteristics {
+	return pipeline.Characteristics{
 		HasExternalBackoff:     true,
 		SupportsMessageLatency: true,
 	}
 }
 
-func (r *PubSubMQFlow) RequestChannels() []api.RequestChannel {
+func (r *PubSubMQFlow) RequestChannels() []pipeline.RequestChannel {
 
-	var channels []api.RequestChannel
+	var channels []pipeline.RequestChannel
 	for _, channelData := range r.requestChannels {
 		channels = append(channels, channelData.requestChannel)
 	}
@@ -192,16 +191,15 @@ func resultWorker(ctx context.Context, publisher *pubsub.Publisher, resultChanne
 			bytes, err := json.Marshal(msg)
 			var msgBytes []byte
 			if err != nil {
-				fallback := map[string]string{"id": msg.Id, "error": "Failed to marshal result to string"}
+				fallback := map[string]string{"id": msg.ID, "error": "Failed to marshal result to string"}
 				msgBytes, _ = json.Marshal(fallback)
 			} else {
 				msgBytes = bytes
 			}
 			publishPubSub(ctx, publisher, msgBytes, map[string]string{})
-			pubsubID := msg.Metadata[PUBSUB_ID]
-			value, ok := resultChannels.Load(pubsubID)
+			value, ok := resultChannels.Load(msg.Routing.TransportCorrelationID)
 			if !ok {
-				logger.V(logutil.DEFAULT).Error(nil, "Result channel not found for message", "pubsubID", pubsubID)
+				logger.V(logutil.DEFAULT).Error(nil, "Result channel not found for message", "pubsubID", msg.Routing.TransportCorrelationID)
 				continue
 			}
 			resultChannel := value.(chan bool)
@@ -220,7 +218,7 @@ func publishPubSub(ctx context.Context, publisher *pubsub.Publisher, msg []byte,
 
 }
 
-func addMsgToRetryQueue(ctx context.Context, retryChannel chan api.RetryMessage) {
+func addMsgToRetryQueue(ctx context.Context, retryChannel chan pipeline.RetryMessage) {
 	logger := log.FromContext(ctx)
 
 	for {
@@ -229,14 +227,16 @@ func addMsgToRetryQueue(ctx context.Context, retryChannel chan api.RetryMessage)
 			return
 
 		case msg := <-retryChannel:
-			pubsubID := msg.RequestMessage.Metadata[PUBSUB_ID]
-			value, ok := resultChannels.Load(pubsubID)
+			if msg.InternalRequest == nil {
+				continue
+			}
+			value, ok := resultChannels.Load(msg.InternalRouting.TransportCorrelationID)
 			if !ok {
-				logger.V(logutil.DEFAULT).Error(nil, "Result channel not found for retry message", "pubsubID", pubsubID)
+				logger.V(logutil.DEFAULT).Error(nil, "Result channel not found for retry message", "pubsubID", msg.InternalRouting.TransportCorrelationID)
 				continue
 			}
 			resultChannel := value.(chan bool)
-			logger.V(logutil.DEBUG).Info("Retrying message", "pubsubID", pubsubID)
+			logger.V(logutil.DEBUG).Info("Retrying message", "pubsubID", msg.InternalRouting.TransportCorrelationID)
 			resultChannel <- false
 
 		}
@@ -244,7 +244,7 @@ func addMsgToRetryQueue(ctx context.Context, retryChannel chan api.RetryMessage)
 
 }
 
-func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.Client, subscriberID string, ch chan api.RequestMessage, gate api.DispatchGate) {
+func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.Client, subscriberID string, ch chan *api.InternalRequest, gate pipeline.DispatchGate) {
 	logger := log.FromContext(ctx)
 
 	sub := pubSubClient.Subscriber(subscriberID)
@@ -278,7 +278,9 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 			cancel()
 			continue
 		}
+
 		err := r.processMessages(receiveCtx, sub.Receive, ch, gate)
+
 		cancel()
 		// TODO
 		if err != nil {
@@ -290,35 +292,27 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 
 type receiveFunc func(context.Context, func(context.Context, *pubsub.Message)) error
 
-func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc, ch chan api.RequestMessage, gate api.DispatchGate) error {
+func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc, ch chan *api.InternalRequest, gate pipeline.DispatchGate) error {
 	logger := log.FromContext(ctx)
 	return receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
 
-		deliveryAttempt := msg.DeliveryAttempt
-
-		var msgObj api.RequestMessage
-		err := json.Unmarshal(msg.Data, &msgObj)
+		var body api.RequestMessage
+		err := json.Unmarshal(msg.Data, &body)
 		if err != nil {
 			logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal message from request queue")
 			msg.Ack()
 			return
 		}
 
-		resultsChannel := make(chan bool, 1)
-		resultChannels.Store(msg.ID, resultsChannel)
-		defer resultChannels.Delete(msg.ID)
-
-		if msgObj.Metadata == nil {
-			msgObj.Metadata = make(map[string]string)
+		irout := api.InternalRouting{TransportCorrelationID: msg.ID}
+		if msg.DeliveryAttempt != nil {
+			irout.RetryCount = *msg.DeliveryAttempt - 1
 		}
-		msgObj.Metadata[PUBSUB_ID] = msg.ID
-		if deliveryAttempt != nil {
-			msgObj.RetryCount = *deliveryAttempt - 1
-		}
+		ir := api.NewInternalRequest(irout, &body)
 
 		// Per-attribute gating
 		var release func()
-		if attrGate, ok := gate.(api.AttributeGate); ok {
+		if attrGate, ok := gate.(pipeline.AttributeGate); ok {
 			allowed, rel, err := attrGate.Acquire(ctx, msg.Attributes)
 			if err != nil {
 				logger.V(logutil.DEFAULT).Error(err, "Failed to acquire attribute quota")
@@ -335,7 +329,11 @@ func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc,
 		}
 		defer release()
 
-		ch <- msgObj
+		resultsChannel := make(chan bool, 1)
+		resultChannels.Store(msg.ID, resultsChannel)
+		defer resultChannels.Delete(msg.ID)
+
+		ch <- ir
 
 		result := <-resultsChannel
 		if !result {

@@ -55,7 +55,7 @@ var _ = ginkgo.Describe("Attribute Gating E2E", func() {
 			return getResultCount(ctx, rdb, resultQueue)
 		}, 30*time.Second, 1*time.Second).Should(gomega.BeNumerically(">=", 1))
 		result1 := popResult(ctx, rdb, resultQueue)
-		gomega.Expect(result1.Id).To(gomega.Equal("quota-1"))
+		gomega.Expect(result1.ID).To(gomega.Equal("quota-1"))
 
 		// 5. Verify Request 2 is now processed
 		gomega.Eventually(func() []string {
@@ -67,7 +67,7 @@ var _ = ginkgo.Describe("Attribute Gating E2E", func() {
 			return getResultCount(ctx, rdb, resultQueue)
 		}, 30*time.Second, 1*time.Second).Should(gomega.BeNumerically(">=", 1))
 		result2 := popResult(ctx, rdb, resultQueue)
-		gomega.Expect(result2.Id).To(gomega.Equal("quota-2"))
+		gomega.Expect(result2.ID).To(gomega.Equal("quota-2"))
 	})
 
 	// I will implement a "pseudo" E2E that verifies the logic if I can.

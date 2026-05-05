@@ -3,7 +3,6 @@ package integration_test
 import (
 	"context"
 	"flag"
-	"strconv"
 	"testing"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/llm-d-incubation/llm-d-async/api"
+	"github.com/llm-d-incubation/llm-d-async/pipeline"
 	"github.com/llm-d-incubation/llm-d-async/pkg/redis"
 )
 
@@ -27,15 +27,17 @@ func TestRedisImpl(t *testing.T) {
 	flow := redis.NewRedisMQFlow()
 	flow.Start(ctx)
 
-	flow.RetryChannel() <- api.RetryMessage{
-		EmbelishedRequestMessage: api.EmbelishedRequestMessage{
-			RequestMessage: api.RequestMessage{
-				Id:              "test-id",
-				CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
-				DeadlineUnixSec: strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10),
-				Payload:         map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
-				Metadata:        map[string]string{redis.QUEUE_NAME_KEY: "request-queue"},
-			},
+	flow.RetryChannel() <- pipeline.RetryMessage{
+		EmbelishedRequestMessage: pipeline.EmbelishedRequestMessage{
+			InternalRequest: api.NewInternalRequest(
+				api.InternalRouting{RequestQueueName: "request-queue"},
+				&api.RequestMessage{
+					ID:       "test-id",
+					Created:  time.Now().Unix(),
+					Deadline: time.Now().Add(time.Minute).Unix(),
+					Payload:  map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
+				},
+			),
 			RequestURL:  "http://localhost:30800/v1/completions",
 			HttpHeaders: map[string]string{},
 		},
@@ -60,8 +62,8 @@ func TestRedisImpl(t *testing.T) {
 
 	select {
 	case req := <-mergedChannel.Channel:
-		if req.Id != "test-id" {
-			t.Errorf("Expected message id to be test-id, got %s", req.Id)
+		if req.PublicRequest == nil || req.PublicRequest.ReqID() != "test-id" {
+			t.Errorf("Expected message id to be test-id, got %v", req.PublicRequest)
 		}
 	case <-time.After(2 * time.Second):
 		t.Errorf("Expected message in request channel after backoff")
@@ -83,7 +85,7 @@ func TestRedisImplWithAuth(t *testing.T) {
 
 	// Publish a result message
 	flow.ResultChannel() <- api.ResultMessage{
-		Id: "test-auth-id",
+		ID: "test-auth-id",
 	}
 
 	// Wait for processing

@@ -9,14 +9,13 @@ import (
 	"time"
 
 	"github.com/llm-d-incubation/llm-d-async/api"
+	"github.com/llm-d-incubation/llm-d-async/pipeline"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 	"github.com/redis/go-redis/v9"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
-
-const QUEUE_NAME_KEY = "queue_name"
 
 const (
 	// resultChannelBuffer decouples inference workers from the result writer.
@@ -64,6 +63,33 @@ end
 return items
 `)
 
+const maxRetries = 3
+
+func retryRedisOp(ctx context.Context, fn func(ctx context.Context) error) error {
+	var lastErr error
+	for attempt := range maxRetries {
+		execCtx := ctx
+		if execCtx.Err() != nil {
+			execCtx = context.Background()
+		}
+		if err := fn(execCtx); err != nil {
+			lastErr = err
+			if attempt == maxRetries-1 {
+				break
+			}
+			// On shutdown (ctx cancelled), skip backoff and retry immediately
+			// to maximize the chance of flushing data before SIGKILL.
+			select {
+			case <-time.After(time.Duration(1<<attempt) * 100 * time.Millisecond):
+			case <-ctx.Done():
+			}
+		} else {
+			return nil
+		}
+	}
+	return lastErr
+}
+
 func drainBatch[T any](first T, channel <-chan T, maxBatchSize int) []T {
 	batch := make([]T, 1, maxBatchSize)
 	batch[0] = first
@@ -86,16 +112,16 @@ type QueueConfig struct {
 }
 
 type RequestChannelData struct {
-	requestChannel api.RequestChannel
+	requestChannel pipeline.RequestChannel
 	queueName      string
 }
 
-var _ api.Flow = (*RedisMQFlow)(nil)
+var _ pipeline.Flow = (*RedisMQFlow)(nil)
 
 type RedisMQFlow struct {
 	rdb             *redis.Client
 	requestChannels []RequestChannelData
-	retryChannel    chan api.RetryMessage
+	retryChannel    chan pipeline.RetryMessage
 	resultChannel   chan api.ResultMessage
 }
 
@@ -122,9 +148,9 @@ func NewRedisMQFlow() *RedisMQFlow {
 	var channels []RequestChannelData
 
 	for _, cfg := range configs {
-		ch := make(chan api.RequestMessage)
+		ch := make(chan *api.InternalRequest)
 
-		channels = append(channels, RequestChannelData{api.RequestChannel{
+		channels = append(channels, RequestChannelData{pipeline.RequestChannel{
 			Channel:            ch,
 			InferenceObjective: cfg.InferenceObjective,
 			RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
@@ -134,7 +160,7 @@ func NewRedisMQFlow() *RedisMQFlow {
 	return &RedisMQFlow{
 		rdb:             rdb,
 		requestChannels: channels,
-		retryChannel:    make(chan api.RetryMessage),
+		retryChannel:    make(chan pipeline.RetryMessage),
 		resultChannel:   make(chan api.ResultMessage, resultChannelBuffer),
 	}
 }
@@ -151,9 +177,9 @@ func (r *RedisMQFlow) Start(ctx context.Context) {
 
 	go r.resultWorker(ctx, *resultQueueName)
 }
-func (r *RedisMQFlow) RequestChannels() []api.RequestChannel {
+func (r *RedisMQFlow) RequestChannels() []pipeline.RequestChannel {
 
-	var channels []api.RequestChannel
+	var channels []pipeline.RequestChannel
 	for _, channelData := range r.requestChannels {
 		channels = append(channels, channelData.requestChannel)
 	}
@@ -161,7 +187,7 @@ func (r *RedisMQFlow) RequestChannels() []api.RequestChannel {
 
 }
 
-func (r *RedisMQFlow) RetryChannel() chan api.RetryMessage {
+func (r *RedisMQFlow) RetryChannel() chan pipeline.RetryMessage {
 	return r.retryChannel
 }
 
@@ -196,21 +222,15 @@ func (r *RedisMQFlow) resultWorker(ctx context.Context, resultsQueueName string)
 
 func (r *RedisMQFlow) flushResultBatch(ctx context.Context, batch []api.ResultMessage, resultsQueueName string) {
 	logger := log.FromContext(ctx)
-	const maxRetries = 3
-	for attempt := range maxRetries {
+	if err := retryRedisOp(ctx, func(ctx context.Context) error {
 		pipe := r.rdb.Pipeline()
 		for _, result := range batch {
 			pipe.Publish(ctx, resultsQueueName, marshalResultMessage(result))
 		}
-		if _, err := pipe.Exec(ctx); err != nil {
-			logger.V(logutil.DEFAULT).Error(err, "Failed to publish result batch to Redis",
-				"batchSize", len(batch), "attempt", attempt+1)
-			if attempt < maxRetries-1 {
-				time.Sleep(time.Duration(1<<attempt) * 100 * time.Millisecond)
-			}
-		} else {
-			return
-		}
+		_, err := pipe.Exec(ctx)
+		return err
+	}); err != nil {
+		logger.V(logutil.DEFAULT).Error(err, "Failed to publish result batch to Redis", "batchSize", len(batch))
 	}
 }
 
@@ -218,13 +238,13 @@ func marshalResultMessage(msg api.ResultMessage) string {
 	if bytes, err := json.Marshal(msg); err == nil {
 		return string(bytes)
 	}
-	fallback := map[string]string{"id": msg.Id, "error": "Failed to marshal result to string"}
+	fallback := map[string]string{"id": msg.ID, "error": "Failed to marshal result to string"}
 	fallbackBytes, _ := json.Marshal(fallback)
 	return string(fallbackBytes)
 }
 
 // pulls from Redis channel and put in the request channel
-func requestWorker(ctx context.Context, rdb *redis.Client, msgChannel chan api.RequestMessage, queueName string) {
+func requestWorker(ctx context.Context, rdb *redis.Client, msgChannel chan *api.InternalRequest, queueName string) {
 	logger := log.FromContext(ctx)
 	sub := rdb.Subscribe(ctx, queueName)
 	defer sub.Close() // nolint:errcheck
@@ -236,33 +256,32 @@ func requestWorker(ctx context.Context, rdb *redis.Client, msgChannel chan api.R
 			return
 
 		case rmsg := <-ch:
-			var msg api.RequestMessage
+			var ir api.InternalRequest
 
-			err := json.Unmarshal([]byte(rmsg.Payload), &msg)
+			err := json.Unmarshal([]byte(rmsg.Payload), &ir)
 			if err != nil {
 				logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal message from request channel")
 				continue // skip this message
-
 			}
-			if msg.Metadata == nil {
-				msg.Metadata = make(map[string]string)
+			if ir.PublicRequest == nil {
+				continue
 			}
-			msg.Metadata[QUEUE_NAME_KEY] = queueName
-			msgChannel <- msg
+			ir.RequestQueueName = queueName
+			msgChannel <- &ir
 		}
 	}
 
 }
 
-func (r *RedisMQFlow) Characteristics() api.Characteristics {
-	return api.Characteristics{
+func (r *RedisMQFlow) Characteristics() pipeline.Characteristics {
+	return pipeline.Characteristics{
 		HasExternalBackoff:     false,
 		SupportsMessageLatency: false,
 	}
 }
 
 // Puts msgs from the retry channel into a Redis sorted-set with a duration Score.
-func addMsgToRetryWorker(ctx context.Context, rdb *redis.Client, retryChannel chan api.RetryMessage, sortedSetName string) {
+func addMsgToRetryWorker(ctx context.Context, rdb *redis.Client, retryChannel chan pipeline.RetryMessage, sortedSetName string) {
 	logger := log.FromContext(ctx)
 	for {
 		select {
@@ -270,8 +289,11 @@ func addMsgToRetryWorker(ctx context.Context, rdb *redis.Client, retryChannel ch
 			return
 
 		case msg := <-retryChannel:
+			if msg.InternalRequest == nil {
+				continue
+			}
 			score := float64(time.Now().Unix()) + msg.BackoffDurationSeconds
-			bytes, err := json.Marshal(msg.RequestMessage)
+			bytes, err := json.Marshal(msg.InternalRequest)
 			if err != nil {
 				logger.V(logutil.DEFAULT).Error(err, "Failed to marshal message for retry in Redis")
 				continue // skip this message.
@@ -294,7 +316,7 @@ func addMsgToRetryWorker(ctx context.Context, rdb *redis.Client, retryChannel ch
 func (r *RedisMQFlow) retryWorker(ctx context.Context, rdb *redis.Client) {
 	logger := log.FromContext(ctx)
 	// create a map of queuename to channel based on requestchannels
-	msgChannels := make(map[string]chan api.RequestMessage)
+	msgChannels := make(map[string]chan *api.InternalRequest)
 	for _, channelData := range r.requestChannels {
 		msgChannels[channelData.queueName] = channelData.requestChannel.Channel
 	}
@@ -320,21 +342,24 @@ func (r *RedisMQFlow) retryWorker(ctx context.Context, rdb *redis.Client) {
 				}
 
 				for i, msg := range results {
-					var message api.RequestMessage
+					var message api.InternalRequest
 					err := json.Unmarshal([]byte(msg), &message)
 					if err != nil {
 						logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal retry message")
 						continue
 					}
-					queueName := message.Metadata[QUEUE_NAME_KEY]
+					if message.PublicRequest == nil {
+						continue
+					}
+					queueName := message.RequestQueueName
 					msgChannel, ok := msgChannels[queueName]
 					if !ok {
-						logger.V(logutil.DEFAULT).Info("Unknown retry queue, dropping message", "queueName", queueName, "messageId", message.Id)
+						logger.V(logutil.DEFAULT).Info("Unknown retry queue, dropping message", "queueName", queueName, "messageId", message.PublicRequest.ReqID())
 						continue
 					}
 
 					select {
-					case msgChannel <- message:
+					case msgChannel <- &message:
 					case <-ctx.Done():
 						r.requeueRetryMessages(rdb, results[i:])
 						return
@@ -354,21 +379,15 @@ func (r *RedisMQFlow) requeueRetryMessages(rdb *redis.Client, messages []string)
 	}
 	logger := log.FromContext(context.Background())
 	score := float64(time.Now().Unix())
-	const maxRetries = 3
-	for attempt := range maxRetries {
+	if err := retryRedisOp(context.Background(), func(ctx context.Context) error {
 		pipe := rdb.Pipeline()
 		for _, msg := range messages {
-			pipe.ZAdd(context.Background(), *retryQueueName, redis.Z{Score: score, Member: msg})
+			pipe.ZAdd(ctx, *retryQueueName, redis.Z{Score: score, Member: msg})
 		}
-		if _, err := pipe.Exec(context.Background()); err != nil {
-			logger.V(logutil.DEFAULT).Error(err, "Failed to requeue retry messages on shutdown",
-				"count", len(messages), "attempt", attempt+1)
-			if attempt < maxRetries-1 {
-				time.Sleep(time.Duration(1<<attempt) * 100 * time.Millisecond)
-			}
-		} else {
-			return
-		}
+		_, err := pipe.Exec(ctx)
+		return err
+	}); err != nil {
+		logger.V(logutil.DEFAULT).Error(err, "Failed to requeue retry messages on shutdown", "count", len(messages))
 	}
 }
 

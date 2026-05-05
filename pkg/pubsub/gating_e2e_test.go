@@ -22,11 +22,11 @@ func TestGating_EndToEnd(t *testing.T) {
 	defer rdb.Close()
 
 	flow := &PubSubMQFlow{}
-	ch := make(chan api.RequestMessage, 10)
+	ch := make(chan *api.InternalRequest, 10)
 
 	// Helper to create a message that records its outcome
 	createMsg := func(id string, userid string) *pubsub.Message {
-		data, _ := json.Marshal(api.RequestMessage{Id: id})
+		data, _ := json.Marshal(api.RequestMessage{ID: id})
 		msg := &pubsub.Message{
 			ID:         id,
 			Data:       data,
@@ -64,11 +64,11 @@ func TestGating_EndToEnd(t *testing.T) {
 		}()
 
 		// Verification: Request 1 should reach the channel
-		var req1 api.RequestMessage
+		var req1 *api.InternalRequest
 		select {
 		case req1 = <-ch:
-			if req1.Id != "req-1" {
-				t.Fatalf("Expected req-1, got %s", req1.Id)
+			if req1.PublicRequest.ReqID() != "req-1" {
+				t.Fatalf("Expected req-1, got %s", req1.PublicRequest.ReqID())
 			}
 		case <-time.After(1 * time.Second):
 			t.Fatal("Timeout waiting for req-1")
@@ -98,7 +98,7 @@ func TestGating_EndToEnd(t *testing.T) {
 		}
 
 		// 3. Complete Request 1
-		pubsubID := req1.Metadata[PUBSUB_ID]
+		pubsubID := req1.TransportCorrelationID
 		val, _ := resultChannels.Load(pubsubID)
 		resCh := val.(chan bool)
 		resCh <- true // Success
@@ -116,8 +116,8 @@ func TestGating_EndToEnd(t *testing.T) {
 
 		select {
 		case req3 := <-ch:
-			if req3.Id != "req-3" {
-				t.Fatalf("Expected req-3, got %s", req3.Id)
+			if req3.PublicRequest.ReqID() != "req-3" {
+				t.Fatalf("Expected req-3, got %s", req3.PublicRequest.ReqID())
 			}
 		case <-time.After(1 * time.Second):
 			t.Fatal("Timeout waiting for req-3")
@@ -143,7 +143,7 @@ func TestGating_EndToEnd(t *testing.T) {
 			select {
 			case req := <-ch:
 				// Finish it immediately
-				pubsubID := req.Metadata[PUBSUB_ID]
+				pubsubID := req.TransportCorrelationID
 				val, _ := resultChannels.Load(pubsubID)
 				resCh := val.(chan bool)
 				resCh <- true

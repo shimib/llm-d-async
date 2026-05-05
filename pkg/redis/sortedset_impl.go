@@ -7,20 +7,18 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/llm-d-incubation/llm-d-async/api"
+	"github.com/llm-d-incubation/llm-d-async/pipeline"
 	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 
 	"github.com/redis/go-redis/v9"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
-
-const SORTEDSET_QUEUE_NAME_KEY = "queue_name"
 
 var (
 	ssIGWBaseURL         = flag.String("redis.ss.igw-base-url", "", "IGW base URL")
@@ -57,23 +55,23 @@ type queueConfig struct {
 }
 
 type requestChannelData struct {
-	channel   api.RequestChannel
+	channel   pipeline.RequestChannel
 	queueName string
-	gate      api.DispatchGate
+	gate      pipeline.DispatchGate
 }
 
-var _ api.Flow = (*RedisSortedSetFlow)(nil)
+var _ pipeline.Flow = (*RedisSortedSetFlow)(nil)
 
 type RedisSortedSetFlow struct {
 	rdb             *redis.Client
 	requestChannels []requestChannelData
-	retryChannel    chan api.RetryMessage
+	retryChannel    chan pipeline.RetryMessage
 	resultChannel   chan api.ResultMessage
 	pollInterval    time.Duration
 	batchSize       int
-	gate            api.DispatchGate
-	gateFactory     api.GateFactory
 	activeReleases  sync.Map
+	gate            pipeline.DispatchGate
+	gateFactory     pipeline.GateFactory
 }
 
 // SortedSetOption is a functional option for configuring RedisSortedSetFlow
@@ -81,7 +79,7 @@ type SortedSetOption func(*RedisSortedSetFlow)
 
 // WithGateFactory sets a GateFactory for per-queue gate instantiation.
 // When set, gates are created per queue from config, overriding any global gate.
-func WithGateFactory(factory api.GateFactory) SortedSetOption {
+func WithGateFactory(factory pipeline.GateFactory) SortedSetOption {
 	return func(r *RedisSortedSetFlow) {
 		r.gateFactory = factory
 	}
@@ -96,7 +94,7 @@ func NewRedisSortedSetFlow(opts ...SortedSetOption) *RedisSortedSetFlow {
 			Password: *RedisPassword,
 		}),
 		requestChannels: make([]requestChannelData, 0, len(configs)),
-		retryChannel:    make(chan api.RetryMessage),
+		retryChannel:    make(chan pipeline.RetryMessage),
 		resultChannel:   make(chan api.ResultMessage, resultChannelBuffer),
 		pollInterval:    time.Duration(*ssPollIntervalMs) * time.Millisecond,
 		batchSize:       *ssBatchSize,
@@ -110,7 +108,7 @@ func NewRedisSortedSetFlow(opts ...SortedSetOption) *RedisSortedSetFlow {
 	// Create per-queue channels with gates
 	for _, cfg := range configs {
 		// Determine gate for this queue
-		var gate api.DispatchGate
+		var gate pipeline.DispatchGate
 		if r.gateFactory != nil && cfg.GateType != "" {
 			// Use factory to create per-queue gate
 			var err error
@@ -123,11 +121,11 @@ func NewRedisSortedSetFlow(opts ...SortedSetOption) *RedisSortedSetFlow {
 			gate = r.gate
 		} else {
 			// Default to always-open gate
-			gate = api.ConstOpenGate()
+			gate = pipeline.ConstOpenGate()
 		}
 
-		ch := api.RequestChannel{
-			Channel:            make(chan api.RequestMessage),
+		ch := pipeline.RequestChannel{
+			Channel:            make(chan *api.InternalRequest),
 			InferenceObjective: cfg.InferenceObjective,
 			RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
 			IGWBaseURl:         util.NormalizeBaseURL(cfg.IGWBaseURl),
@@ -143,7 +141,7 @@ func NewRedisSortedSetFlow(opts ...SortedSetOption) *RedisSortedSetFlow {
 
 	// Set default gate if not already set
 	if r.gate == nil {
-		r.gate = api.ConstOpenGate()
+		r.gate = pipeline.ConstOpenGate()
 	}
 
 	return r
@@ -180,15 +178,15 @@ func (r *RedisSortedSetFlow) Start(ctx context.Context) {
 	go r.resultWorker(ctx)
 }
 
-func (r *RedisSortedSetFlow) RequestChannels() []api.RequestChannel {
-	channels := make([]api.RequestChannel, len(r.requestChannels))
+func (r *RedisSortedSetFlow) RequestChannels() []pipeline.RequestChannel {
+	channels := make([]pipeline.RequestChannel, len(r.requestChannels))
 	for i, ch := range r.requestChannels {
 		channels[i] = ch.channel
 	}
 	return channels
 }
 
-func (r *RedisSortedSetFlow) RetryChannel() chan api.RetryMessage {
+func (r *RedisSortedSetFlow) RetryChannel() chan pipeline.RetryMessage {
 	return r.retryChannel
 }
 
@@ -196,18 +194,18 @@ func (r *RedisSortedSetFlow) ResultChannel() chan api.ResultMessage {
 	return r.resultChannel
 }
 
-func (r *RedisSortedSetFlow) Characteristics() api.Characteristics {
-	return api.Characteristics{HasExternalBackoff: false, SupportsMessageLatency: false}
+func (r *RedisSortedSetFlow) Characteristics() pipeline.Characteristics {
+	return pipeline.Characteristics{HasExternalBackoff: false, SupportsMessageLatency: false}
 }
 
 // Polls sorted set and processes messages by deadline priority (earliest first)
-func (r *RedisSortedSetFlow) requestWorker(ctx context.Context, msgChannel chan api.RequestMessage, queueName string) {
+func (r *RedisSortedSetFlow) requestWorker(ctx context.Context, msgChannel chan *api.InternalRequest, queueName string) {
 	logger := log.FromContext(ctx)
 	ticker := time.NewTicker(r.pollInterval)
 	defer ticker.Stop()
 
 	// Find the gate for this queue
-	var gate api.DispatchGate
+	var gate pipeline.DispatchGate
 	for _, ch := range r.requestChannels {
 		if ch.queueName == queueName {
 			gate = ch.gate
@@ -228,7 +226,7 @@ func (r *RedisSortedSetFlow) requestWorker(ctx context.Context, msgChannel chan 
 	}
 }
 
-func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel chan api.RequestMessage, queueName string, gate api.DispatchGate, logger logr.Logger) {
+func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel chan *api.InternalRequest, queueName string, gate pipeline.DispatchGate, logger logr.Logger) {
 	currentTime := float64(time.Now().Unix())
 
 	budget := gate.Budget(ctx)
@@ -244,35 +242,40 @@ func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel cha
 			break
 		}
 
-		msg, deadline, ok := r.parseMessage(results[0], logger)
+		ir, deadline, ok := r.parseMessage(results[0], logger)
 		if !ok {
 			continue
 		}
-
+		if ir == nil {
+			continue
+		}
+		rview := ir.PublicRequest
+		if rview == nil {
+			continue
+		}
 		if deadline < currentTime {
-			logger.V(logutil.DEFAULT).Info("Deadline expired", "id", msg.Id)
+			logger.V(logutil.DEFAULT).Info("Deadline expired", "id", rview.ReqID())
 			continue
 		}
 
-		if msg.Metadata == nil {
-			msg.Metadata = make(map[string]string)
+		if ir.RequestQueueName == "" {
+			ir.RequestQueueName = queueName
 		}
-		msg.Metadata[SORTEDSET_QUEUE_NAME_KEY] = queueName
 
 		// Per-attribute gating
 		var release func()
-		if attrGate, ok := gate.(api.AttributeGate); ok {
-			allowed, rel, err := attrGate.Acquire(ctx, msg.Metadata)
+		if attrGate, ok := gate.(pipeline.AttributeGate); ok {
+			allowed, rel, err := attrGate.Acquire(ctx, rview.ReqMetadata())
 			if err != nil {
 				logger.V(logutil.DEFAULT).Error(err, "Failed to acquire attribute quota")
 				// Re-enqueue the message if acquisition fails
-				member, _ := json.Marshal(msg)
+				member, _ := json.Marshal(rview)
 				r.rdb.ZAdd(ctx, queueName, redis.Z{Score: deadline, Member: string(member)})
 				continue
 			}
 			if !allowed {
 				// Re-enqueue the message (wait for quota)
-				member, _ := json.Marshal(msg)
+				member, _ := json.Marshal(rview)
 				r.rdb.ZAdd(ctx, queueName, redis.Z{Score: deadline, Member: string(member)})
 				continue
 			}
@@ -282,36 +285,48 @@ func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel cha
 		}
 
 		select {
-		case msgChannel <- msg:
+
+		case msgChannel <- ir:
 			if release != nil {
-				r.activeReleases.Store(msg.Id, release)
+				r.activeReleases.Store(rview.ReqID(), release)
 			}
 		case <-ctx.Done():
-			release()
+			if err := retryRedisOp(context.Background(), func(ctx context.Context) error {
+				return r.rdb.ZAdd(ctx, queueName, redis.Z{
+					Score:  results[0].Score,
+					Member: results[0].Member,
+				}).Err()
+			}); err != nil {
+				logger.V(logutil.DEFAULT).Error(err, "Failed to re-queue message on shutdown", "id", rview.ReqID())
+			}
+
 			return
 		}
 	}
 }
 
-func (r *RedisSortedSetFlow) parseMessage(z redis.Z, logger logr.Logger) (api.RequestMessage, float64, bool) {
-	var msg api.RequestMessage
-	if err := json.Unmarshal([]byte(z.Member.(string)), &msg); err != nil {
+func (r *RedisSortedSetFlow) parseMessage(z redis.Z, logger logr.Logger) (*api.InternalRequest, float64, bool) {
+	var ir api.InternalRequest
+	if err := json.Unmarshal([]byte(z.Member.(string)), &ir); err != nil {
 		logger.V(logutil.DEFAULT).Error(err, "Failed to unmarshal message")
-		return msg, 0, false
+		return nil, 0, false
+	}
+	if ir.PublicRequest == nil {
+		logger.V(logutil.DEFAULT).Error(nil, "Missing specific request in message", "id", z.Member)
+		return nil, 0, false
+	}
+	deadline := ir.PublicRequest.ReqDeadline()
+	if deadline <= 0 {
+		logger.V(logutil.DEFAULT).Error(nil, "Invalid deadline", "id", ir.PublicRequest.ReqID())
+		return &ir, 0, false
 	}
 
-	deadline, err := strconv.ParseInt(msg.DeadlineUnixSec, 10, 64)
-	if err != nil {
-		logger.V(logutil.DEFAULT).Error(err, "Invalid deadline", "id", msg.Id)
-		return msg, 0, false
-	}
-
-	return msg, float64(deadline), true
+	return &ir, float64(deadline), true
 }
 
 // Re-queues failed messages with exponential backoff
 func (r *RedisSortedSetFlow) retryWorker(ctx context.Context) {
-	processMsg := func(processCtx context.Context, msg api.RetryMessage) {
+	processMsg := func(processCtx context.Context, msg pipeline.RetryMessage) {
 		batch := drainBatch(msg, r.retryChannel, maxBatchSize)
 		r.flushRetryBatch(processCtx, batch)
 	}
@@ -333,7 +348,7 @@ func (r *RedisSortedSetFlow) retryWorker(ctx context.Context) {
 	}
 }
 
-func (r *RedisSortedSetFlow) flushRetryBatch(ctx context.Context, batch []api.RetryMessage) {
+func (r *RedisSortedSetFlow) flushRetryBatch(ctx context.Context, batch []pipeline.RetryMessage) {
 	if len(batch) == 0 {
 		return
 	}
@@ -346,12 +361,15 @@ func (r *RedisSortedSetFlow) flushRetryBatch(ctx context.Context, batch []api.Re
 
 	entries := make([]retryEntry, 0, len(batch))
 	for _, msg := range batch {
-		queueName := msg.Metadata[SORTEDSET_QUEUE_NAME_KEY]
+		if msg.InternalRequest == nil {
+			logger.V(logutil.DEFAULT).Error(nil, "Retry message missing InternalRequest")
+			continue
+		}
+		queueName := msg.RequestQueueName
 		if queueName == "" {
 			queueName = *ssRequestQueueName
 		}
-
-		bytes, err := json.Marshal(msg.RequestMessage)
+		bytes, err := json.Marshal(msg.InternalRequest)
 		if err != nil {
 			logger.V(logutil.DEFAULT).Error(err, "Failed to marshal retry")
 			continue
@@ -364,28 +382,15 @@ func (r *RedisSortedSetFlow) flushRetryBatch(ctx context.Context, batch []api.Re
 		})
 	}
 
-	const maxRetries = 3
-	for attempt := range maxRetries {
-		execCtx := ctx
-		if execCtx.Err() != nil {
-			execCtx = context.Background()
-		}
-
+	if err := retryRedisOp(ctx, func(ctx context.Context) error {
 		pipe := r.rdb.Pipeline()
 		for _, entry := range entries {
-			pipe.ZAdd(execCtx, entry.queue, entry.value)
+			pipe.ZAdd(ctx, entry.queue, entry.value)
 		}
-		if _, err := pipe.Exec(execCtx); err != nil {
-			logger.V(logutil.DEFAULT).Error(err, "Failed to add retry batch",
-				"batchSize", len(entries), "attempt", attempt+1)
-			if attempt < maxRetries-1 {
-				time.Sleep(time.Duration(1<<attempt) * 100 * time.Millisecond)
-			}
-		} else {
-			logger.V(logutil.DEBUG).Info("Pushed retry batch", "batchSize", len(batch))
-			return
-		}
-
+		_, err := pipe.Exec(ctx)
+		return err
+	}); err == nil {
+		logger.V(logutil.DEBUG).Info("Pushed retry batch", "batchSize", len(batch))
 	}
 }
 
@@ -397,7 +402,7 @@ func (r *RedisSortedSetFlow) resultWorker(ctx context.Context) {
 		batch := drainBatch(msg, r.resultChannel, maxBatchSize)
 		// Release quota for all messages in the batch
 		for _, m := range batch {
-			if rel, ok := r.activeReleases.LoadAndDelete(m.Id); ok {
+			if rel, ok := r.activeReleases.LoadAndDelete(m.ID); ok {
 				rel.(func())()
 			}
 		}
@@ -427,35 +432,23 @@ func (r *RedisSortedSetFlow) flushResultBatch(ctx context.Context, batch []api.R
 	queued := make(map[string][]string)
 	for _, result := range batch {
 		resultQueue := defaultQueue
-		if customQueue := result.Metadata["result_queue"]; customQueue != "" {
-			resultQueue = customQueue
+		if result.Routing.ResultQueueName != "" {
+			resultQueue = result.Routing.ResultQueueName
 		}
 		queued[resultQueue] = append(queued[resultQueue], r.marshalResult(result))
 	}
 
-	const maxRetries = 3
-	for attempt := range maxRetries {
-		execCtx := ctx
-		if execCtx.Err() != nil {
-			execCtx = context.Background()
-		}
-
+	if err := retryRedisOp(ctx, func(ctx context.Context) error {
 		pipe := r.rdb.Pipeline()
 		for queue, msgs := range queued {
 			for _, msgStr := range msgs {
-				pipe.LPush(execCtx, queue, msgStr)
+				pipe.LPush(ctx, queue, msgStr)
 			}
 		}
-		if _, err := pipe.Exec(execCtx); err != nil {
-			logger.V(logutil.DEFAULT).Error(err, "Failed to push result batch to Redis",
-				"batchSize", len(batch), "attempt", attempt+1)
-			if attempt < maxRetries-1 {
-				time.Sleep(time.Duration(1<<attempt) * 100 * time.Millisecond)
-			}
-		} else {
-			logger.V(logutil.DEBUG).Info("Pushed result batch", "batchSize", len(batch))
-			return
-		}
+		_, err := pipe.Exec(ctx)
+		return err
+	}); err == nil {
+		logger.V(logutil.DEBUG).Info("Pushed result batch", "batchSize", len(batch))
 	}
 }
 
@@ -463,7 +456,7 @@ func (r *RedisSortedSetFlow) marshalResult(msg api.ResultMessage) string {
 	if bytes, err := json.Marshal(msg); err == nil {
 		return string(bytes)
 	}
-	fallback := map[string]string{"id": msg.Id, "payload": `{"error":"marshal failed"}`}
+	fallback := map[string]string{"id": msg.ID, "payload": `{"error":"marshal failed"}`}
 	fallbackBytes, _ := json.Marshal(fallback)
 	return string(fallbackBytes)
 }

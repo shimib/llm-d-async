@@ -28,7 +28,7 @@ var _ = ginkgo.Describe("Redis Sorted Set E2E", func() {
 
 		result := popResult(ctx, rdb, resultQueue)
 		gomega.Expect(result).NotTo(gomega.BeNil())
-		gomega.Expect(result.Id).To(gomega.Equal("e2e-basic-1"))
+		gomega.Expect(result.ID).To(gomega.Equal("e2e-basic-1"))
 	})
 
 	ginkgo.It("processes messages in deadline order", func() {
@@ -36,13 +36,13 @@ var _ = ginkgo.Describe("Redis Sorted Set E2E", func() {
 
 		// Enqueue 3 messages with different deadlines (out of order)
 		msg1 := makeRequestMessage("deadline-300", 300*time.Second)
-		msg1.DeadlineUnixSec = fmt.Sprintf("%d", now.Add(300*time.Second).Unix())
+		msg1.Deadline = now.Add(300 * time.Second).Unix()
 
 		msg2 := makeRequestMessage("deadline-100", 100*time.Second)
-		msg2.DeadlineUnixSec = fmt.Sprintf("%d", now.Add(100*time.Second).Unix())
+		msg2.Deadline = now.Add(100 * time.Second).Unix()
 
 		msg3 := makeRequestMessage("deadline-200", 200*time.Second)
-		msg3.DeadlineUnixSec = fmt.Sprintf("%d", now.Add(200*time.Second).Unix())
+		msg3.Deadline = now.Add(200 * time.Second).Unix()
 
 		enqueueMessages(ctx, rdb, requestQueue, msg1, msg2, msg3)
 
@@ -80,7 +80,7 @@ var _ = ginkgo.Describe("Redis Sorted Set E2E", func() {
 
 		result := popResult(ctx, rdb, resultQueue)
 		gomega.Expect(result).NotTo(gomega.BeNil())
-		gomega.Expect(result.Id).To(gomega.Equal("valid-msg"))
+		gomega.Expect(result.ID).To(gomega.Equal("valid-msg"))
 	})
 
 	ginkgo.It("retries on 5xx from inference gateway", func() {
@@ -97,7 +97,7 @@ var _ = ginkgo.Describe("Redis Sorted Set E2E", func() {
 
 		result := popResult(ctx, rdb, resultQueue)
 		gomega.Expect(result).NotTo(gomega.BeNil())
-		gomega.Expect(result.Id).To(gomega.Equal("retry-msg"))
+		gomega.Expect(result.ID).To(gomega.Equal("retry-msg"))
 	})
 
 	ginkgo.It("collects all results from batch of messages", func() {
@@ -107,7 +107,7 @@ var _ = ginkgo.Describe("Redis Sorted Set E2E", func() {
 
 		for _, id := range ids {
 			msg := makeRequestMessage(id, 5*time.Minute)
-			msg.DeadlineUnixSec = fmt.Sprintf("%d", deadline.Unix())
+			msg.Deadline = deadline.Unix()
 			enqueueMessage(ctx, rdb, requestQueue, msg)
 		}
 
@@ -121,7 +121,7 @@ var _ = ginkgo.Describe("Redis Sorted Set E2E", func() {
 		for i := 0; i < 5; i++ {
 			r := popResult(ctx, rdb, resultQueue)
 			gomega.Expect(r).NotTo(gomega.BeNil())
-			collected[r.Id] = true
+			collected[r.ID] = true
 		}
 
 		for _, id := range ids {
@@ -168,7 +168,7 @@ var _ = ginkgo.Describe("Dispatch Gate E2E", func() {
 
 		result := popResult(ctx, rdb, resultQueue)
 		gomega.Expect(result).NotTo(gomega.BeNil())
-		gomega.Expect(result.Id).To(gomega.Equal("gated-pause"))
+		gomega.Expect(result.ID).To(gomega.Equal("gated-pause"))
 	})
 
 	ginkgo.It("resumes processing when budget changes from zero to one", func() {

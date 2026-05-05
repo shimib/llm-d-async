@@ -19,21 +19,21 @@ package flowcontrol
 import (
 	"context"
 
-	asyncapi "github.com/llm-d-incubation/llm-d-async/api"
+	pipeline "github.com/llm-d-incubation/llm-d-async/pipeline"
 )
 
-var _ asyncapi.DispatchGate = (*CompositeGate)(nil)
-var _ asyncapi.AttributeGate = (*CompositeGate)(nil)
+var _ pipeline.DispatchGate = (*CompositeGate)(nil)
+var _ pipeline.AttributeGate = (*CompositeGate)(nil)
 
 // CompositeGate combines multiple DispatchGates and/or AttributeGates.
 // It returns the minimum budget across all inner DispatchGates.
 // It acquires quota across all inner AttributeGates (all or nothing).
 type CompositeGate struct {
-	gates []asyncapi.DispatchGate
+	gates []pipeline.DispatchGate
 }
 
 // NewCompositeGate creates a CompositeGate with the given inner gates.
-func NewCompositeGate(gates ...asyncapi.DispatchGate) *CompositeGate {
+func NewCompositeGate(gates ...pipeline.DispatchGate) *CompositeGate {
 	return &CompositeGate{gates: gates}
 }
 
@@ -67,7 +67,7 @@ func (c *CompositeGate) Acquire(ctx context.Context, attributes map[string]strin
 	}
 
 	for _, gate := range c.gates {
-		if attrGate, ok := gate.(asyncapi.AttributeGate); ok {
+		if attrGate, ok := gate.(pipeline.AttributeGate); ok {
 			allowed, release, err := attrGate.Acquire(ctx, attributes)
 			if err != nil {
 				releaseAll()

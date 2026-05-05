@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/onsi/gomega"
@@ -24,10 +23,11 @@ const (
 var adminClient = &http.Client{Timeout: 10 * time.Second}
 
 func enqueueMessage(ctx context.Context, rdb *redis.Client, queue string, msg api.RequestMessage) {
-	data, err := json.Marshal(msg)
+	ir := api.NewInternalRequest(api.InternalRouting{}, &msg)
+	data, err := json.Marshal(ir)
 	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
 	err = rdb.ZAdd(ctx, queue, redis.Z{
-		Score:  parseDeadline(msg.DeadlineUnixSec),
+		Score:  float64(msg.Deadline),
 		Member: string(data),
 	}).Err()
 	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
@@ -39,22 +39,16 @@ func enqueueMessage(ctx context.Context, rdb *redis.Client, queue string, msg ap
 func enqueueMessages(ctx context.Context, rdb *redis.Client, queue string, msgs ...api.RequestMessage) {
 	pipe := rdb.Pipeline()
 	for _, msg := range msgs {
-		data, err := json.Marshal(msg)
+		ir := api.NewInternalRequest(api.InternalRouting{}, &msg)
+		data, err := json.Marshal(ir)
 		gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
 		pipe.ZAdd(ctx, queue, redis.Z{
-			Score:  parseDeadline(msg.DeadlineUnixSec),
+			Score:  float64(msg.Deadline),
 			Member: string(data),
 		})
 	}
 	_, err := pipe.Exec(ctx)
 	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
-}
-
-func parseDeadline(deadline string) float64 {
-	var d float64
-	_, err := fmt.Sscanf(deadline, "%f", &d)
-	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
-	return d
 }
 
 func getResultCount(ctx context.Context, rdb *redis.Client, queue string) int64 {
@@ -134,12 +128,34 @@ func clearDispatchGateBudget(ctx context.Context, rdb *redis.Client) {
 	rdb.Del(ctx, dispatchGateBudgetKey) //nolint:errcheck
 }
 
+func resetPromMock(promMockURL string) {
+	req, err := http.NewRequest(http.MethodDelete, promMockURL+"/admin/reset", nil)
+	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
+	resp, err := adminClient.Do(req)
+	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
+	defer resp.Body.Close() //nolint:errcheck
+	gomega.ExpectWithOffset(1, resp.StatusCode).To(gomega.Equal(http.StatusOK))
+}
+
 func setPromMockSaturation(promMockURL string, value string) {
 	setPromMockValue(promMockURL+"/admin/saturation", value)
 }
 
 func setPromMockBudget(promMockURL string, value string) {
 	setPromMockValue(promMockURL+"/admin/budget", value)
+}
+
+func setPromMockVLLMBudget(promMockURL string, value string) {
+	setPromMockValue(promMockURL+"/admin/vllm-budget", value)
+}
+
+func disablePromMockPrimary(promMockURL string) {
+	req, err := http.NewRequest(http.MethodPost, promMockURL+"/admin/disable-primary", nil)
+	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
+	resp, err := adminClient.Do(req)
+	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
+	defer resp.Body.Close() //nolint:errcheck
+	gomega.ExpectWithOffset(1, resp.StatusCode).To(gomega.Equal(http.StatusOK))
 }
 
 func setPromMockValue(url string, value string) {
@@ -156,9 +172,9 @@ func setPromMockValue(url string, value string) {
 func makeRequestMessage(id string, deadlineOffset time.Duration) api.RequestMessage {
 	deadline := time.Now().Add(deadlineOffset)
 	return api.RequestMessage{
-		Id:              id,
-		CreatedUnixSec:  strconv.FormatInt(time.Now().Unix(), 10),
-		DeadlineUnixSec: fmt.Sprintf("%d", deadline.Unix()),
-		Payload:         map[string]any{"model": id, "prompt": "test"},
+		ID:       id,
+		Created:  time.Now().Unix(),
+		Deadline: deadline.Unix(),
+		Payload:  map[string]any{"model": id, "prompt": "test"},
 	}
 }

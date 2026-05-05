@@ -26,6 +26,9 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v4
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
@@ -48,7 +51,7 @@ runs:
           LATEST_TAG="-t ${{ inputs.registry }}/${{ inputs.image-name }}:latest"
         fi
         docker buildx build \
-          --platform linux/amd64 \
+          --platform linux/amd64,linux/arm64 \
           --build-arg PYTHON_VERSION=${{ inputs.python-version }} \
           -t ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }} \
           ${LATEST_TAG} -f ${{ inputs.docker-file }} --push .

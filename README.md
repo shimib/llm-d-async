@@ -75,7 +75,7 @@ make deploy-ap-on-k8s
     - Publishing a request:
     ```bash
        export REDIS_IP=....
-       kubectl run --rm -i -t publishmsgbox --image=redis --restart=Never -- /usr/local/bin/redis-cli -h $REDIS_IP PUBLISH request-queue '{"id" : "testmsg", "payload":{ "model":"food-review-1", "prompt":"Hi, good morning "}, "deadline" :"23472348233323" }'
+       kubectl run --rm -i -t publishmsgbox --image=redis --restart=Never -- /usr/local/bin/redis-cli -h $REDIS_IP PUBLISH request-queue '{"id" : "testmsg", "payload":{ "model":"food-review-1", "prompt":"Hi, good morning "}, "deadline" :23472348233323 }'
      ```
 
 ## Command line parameters
@@ -101,9 +101,9 @@ For more fine-grained control, configure gates per queue in your configuration f
 
 - `constant`: Always returns budget 1.0 (fully open) - no throttling.
 - `redis`: Queries Redis for dispatch budget (managed by external system).
-- `prometheus-saturation`: Queries Prometheus for pool saturation metric. Returns `1.0 - saturation` if below threshold, `0.0` otherwise.
-- `prometheus-budget`: Queries Prometheus to compute a dispatch budget using the formula `D = 1 - (F_SYS + F_EPP + B)`, where `F_SYS` is pool saturation, `F_EPP` is normalized EPP queue depth, and `B` is a configurable baseline reserve.
 - `composite`: Combines multiple gates. Returns the minimum budget across all inner dispatch gates and acquires quota across all inner attribute gates (all or nothing).
+- `prometheus-saturation`: Queries Prometheus for pool saturation metric. The gate closes (returns `0.0`) when saturation ≥ threshold; when open it returns `(1 - saturation) - (1 - threshold)`, i.e. the margin below the threshold.
+- `prometheus-budget`: Computes a dispatch budget D using a cascade of two Prometheus metric sources. Both sources compute `max_SYS = ready_pods × max_concurrency` dynamically. The primary source uses the EPP flow control queue size: `D = 1 − (queue_size / max_SYS)`. If the primary is unavailable, it falls back to a secondary source using vLLM and pool metrics: `D = 1 − (running_requests / max_SYS)`. The gate closes when D ≤ B (baseline); callers compute `N = max_SYS × (D − B)`. See [docs/dispatch-budget.md](docs/dispatch-budget.md) for details.
 
 **Example Configuration with Per-Queue Gates:**
 
@@ -132,7 +132,7 @@ For more fine-grained control, configure gates per queue in your configuration f
        "gate_type": "prometheus-budget",
        "gate_params": {
           "pool": "inference_pool_1",
-          "max_sys": "100",
+          "max_concurrency": "100",
           "baseline": "0.05"
        }
     },
@@ -172,12 +172,17 @@ For more fine-grained control, configure gates per queue in your configuration f
   - `threshold` (optional): Saturation threshold (0.0-1.0). When saturation >= threshold, budget is 0.0. Default is `0.8`.
   - `fallback` (optional): Fallback saturation value (0.0-1.0) used when the metric source returns an error or empty data. Default is `0.0`.
 
-- `prometheus-budget`: Computes a dispatch budget using the formula `D = 1 - (F_SYS + F_EPP + B)`, where `F_SYS` is pool saturation,
-  `F_EPP` is normalized EPP queue depth, and `B` is a configurable baseline reserve. This is internally translated into a single Prometheus query.
+- `prometheus-budget`: Cascades two Prometheus metric sources to compute a dispatch budget D.
+  Both sources compute `max_SYS = ready_pods × max_concurrency` dynamically from the `inference_pool_ready_pods` metric.
+  The primary source computes D from the EPP's flow control queue size: `D = 1 − (queue_size / max_SYS)`.
+  If the primary metric is unavailable (e.g. EPP is down), the gate falls back to a secondary source
+  that estimates saturation from vLLM and pool metrics: `D = 1 − (running_requests / max_SYS)`.
+  The gate closes when `D ≤ baseline`; when open it returns `D − baseline`, so callers compute `N = max_SYS × (D − B)`.
+  See [docs/dispatch-budget.md](docs/dispatch-budget.md) for the full derivation.
   - `pool` (**required**): The inference pool name to filter metrics by.
-  - `max_sys` (**required**): Maximum system request capacity, used to normalize the EPP queue depth (`F_EPP = queue_size / max_sys`). Must be a positive number.
-  - `baseline` (optional): Reserved fraction for unexpected traffic bursts. Default is `0.05`.
-  - `fallback` (optional): Fallback budget value (0.0-1.0) returned when metrics are unavailable. Default is `0.0` (fail closed).
+  - `max_concurrency` (optional): Per-endpoint request capacity (`MaxConcurrency` in the [inference scheduler's saturation detector](https://github.com/llm-d/llm-d-inference-scheduler/blob/main/pkg/epp/framework/plugins/flowcontrol/saturationdetector/concurrency/config.go)). Default is `100` (matching the inference scheduler default).
+  - `baseline` (optional): Reserved baseline B. The gate closes when D ≤ B. Default is `0.05`.
+  - `fallback` (optional): Fallback budget value (0.0-1.0) returned when all metric sources are unavailable. Default is `0.0` (fail closed).
 
 ## Request Messages and Consumption
 
@@ -185,23 +190,37 @@ The async processor expects request messages to have the following format:
 
 ```json
 {
-    "id" : "unique identifier for result mapping",
+    "id": "unique identifier for result mapping",
     "created": "created timestamp in Unix seconds",
-    "deadline" : "deadline in Unix seconds",
-    "payload" : {regular inference payload as a byte array}
+    "deadline": "deadline in Unix seconds",
+    "payload": {"regular inference payload"}
 }
 ```
 
-Example:
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier for result mapping (required) |
+| `created` | int64 | Created timestamp in Unix seconds |
+| `deadline` | int64 | Deadline in Unix seconds (required, must be positive) |
+| `payload` | object | Inference request payload |
+| `metadata` | map[string]string | Optional caller-supplied pass-through data (e.g. tracing IDs, user labels) |
+| `endpoint` | string | Optional per-request dispatch path; overrides the queue-level default when set |
+
+**Example:**
 
 ```json
 {
-    "id" : "19933123533434",
-    "created": "1764044000",
-    "deadline" : "1764045130",
-    "payload": byte[]({"model":"food-review","prompt":"hi", "max_tokens":10,"temperature":0})
+    "id": "19933123533434",
+    "created": 1764044000,
+    "deadline": 1764045130,
+    "payload": {"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
+    "metadata": {"user": "batch-job-42"}
 }
 ```
+
+Producers handle wrapping these into the internal wire format used for persistence and routing.
 
 ### Request Merge Policy
 
@@ -378,8 +397,8 @@ Then, in a new terminal window register a subscriber:
 kubectl exec -n redis redis-master-0 -- redis-cli SUBSCRIBE result-queue
 ```
 
-Publish a message for async processing:
+Publish a message for async processing (uses internal wire format since this bypasses the producer):
 
 ```bash
-kubectl exec -n redis redis-master-0 -- redis-cli PUBLISH request-queue '{"id" : "testmsg", "payload":{ "model":"unsloth/Meta-Llama-3.1-8B", "prompt":"hi"}, "deadline" :"9999999999" }'
+kubectl exec -n redis redis-master-0 -- redis-cli PUBLISH request-queue '{"request_kind":"plain","data":{"id":"testmsg","created":1764044000,"deadline":9999999999,"payload":{"model":"unsloth/Meta-Llama-3.1-8B","prompt":"hi"}}}'
 ```

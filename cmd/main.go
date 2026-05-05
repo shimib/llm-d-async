@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/llm-d-incubation/llm-d-async/api"
 	"github.com/llm-d-incubation/llm-d-async/internal/logging"
+	"github.com/llm-d-incubation/llm-d-async/pipeline"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/inference/flowcontrol"
 	"github.com/llm-d-incubation/llm-d-async/pkg/asyncworker"
@@ -50,7 +50,8 @@ func main() {
 	flag.StringVar(&messageQueueImpl, "message-queue-impl", "redis-pubsub", "The message queue implementation to use. Supported implementations: redis-pubsub, redis-sortedset, gcp-pubsub, gcp-pubsub-gated")
 
 	var prometheusURL = flag.String("prometheus-url", "", "Prometheus server URL for metric-based gates (e.g., http://localhost:9090)")
-	var prometheusCacheTTL = flag.Duration("prometheus-cache-ttl", flowcontrol.DefaultCacheTTL, "TTL for cached Prometheus metric sources (e.g. 1m, 0s to disable)")
+
+	var prometheusCacheTTL = flag.Duration("prometheus-cache-ttl", flowcontrol.DefaultCacheTTL, "TTL for cached Prometheus metrics (e.g., 5s, 0s to disable)")
 
 	opts := zap.Options{
 		Development: true,
@@ -71,7 +72,7 @@ func main() {
 	// Create Gate Factory for per-queue gate instantiation
 	gateFactory := flowcontrol.NewGateFactoryWithCacheTTL(*prometheusURL, *prometheusCacheTTL)
 
-	var policy api.RequestMergePolicy
+	var policy pipeline.RequestMergePolicy
 	switch requestMergePolicy {
 	case "random-robin":
 		policy = async.NewRandomRobinPolicy()
@@ -80,7 +81,7 @@ func main() {
 			requestMergePolicy)
 		os.Exit(1)
 	}
-	var impl api.Flow
+	var impl pipeline.Flow
 	switch messageQueueImpl {
 	case "redis-pubsub":
 		impl = redis.NewRedisMQFlow()

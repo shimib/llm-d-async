@@ -2,10 +2,13 @@ name: CI - Release - Docker Container Image
 
 on:
   push:
+    branches:
+      - main  # Runs on every push to main (including PR merges)
     tags:
       - 'v*'  # Runs when a tag like v0.1.0 is pushed
   release:
     types: [published]  # Also runs when a GitHub release is published
+  workflow_dispatch:  # Allows manual trigger
 
 jobs:
   docker-build-and-push:
@@ -26,12 +29,16 @@ jobs:
       - name: Determine tag name
         id: tag
         run: |
+          COMMIT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          echo "commit_sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
           if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
             echo "tag=${GITHUB_REF##refs/tags/}" >> "$GITHUB_OUTPUT"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             echo "tag=${GITHUB_REF##refs/tags/}" >> "$GITHUB_OUTPUT"
-          else
+          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
             echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev" >> "$GITHUB_OUTPUT"
           fi
         shell: bash
 
@@ -48,12 +55,13 @@ jobs:
         run: |
           IMAGE=ghcr.io/llm-d-incubation/${{ steps.version.outputs.project_name }}
           VERSION_TAG=${{ steps.tag.outputs.tag }}
-          echo "Building $IMAGE with tags $VERSION_TAG and latest for linux/amd64"
+          COMMIT_SHA=${{ steps.tag.outputs.commit_sha }}
+          echo "Building $IMAGE with tags $VERSION_TAG and $COMMIT_SHA for linux/amd64,linux/arm64"
           docker buildx build \
-            --platform linux/amd64 \
+            --platform linux/amd64,linux/arm64 \
             --push \
             -t $IMAGE:$VERSION_TAG \
-            -t $IMAGE:latest .
+            -t $IMAGE:$COMMIT_SHA .
 
       - name: Install dependencies for Helm publishing
         run: |

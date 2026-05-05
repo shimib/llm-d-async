@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/llm-d-incubation/llm-d-async/api"
+	"github.com/llm-d-incubation/llm-d-async/pipeline"
 	"github.com/redis/go-redis/v9"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-var _ api.DispatchGate = (*RedisQuotaGate)(nil)
-var _ api.AttributeGate = (*RedisQuotaGate)(nil)
+var _ pipeline.DispatchGate = (*RedisQuotaGate)(nil)
+var _ pipeline.AttributeGate = (*RedisQuotaGate)(nil)
 
 type QuotaMode string
 

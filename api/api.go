@@ -1,112 +1,65 @@
 package api
 
-import (
-	"context"
+// Request is the public interface for submitting requests to the async queue.
+// It exposes only the caller-visible fields. Concrete types like RequestMessage,
+// RedisRequest, and PubSubRequest satisfy this interface.
+type Request interface {
+	ReqID() string
+	ReqCreated() int64
+	ReqDeadline() int64
+	ReqPayload() map[string]any
+	ReqMetadata() map[string]string
+	ReqEndpoint() string
+}
+
+// RequestMessage contains the caller-visible fields of a request. Metadata is reserved
+// for opaque, caller-supplied pass-through data (e.g. tracing IDs, user labels).
+// The system does not read or write Metadata for its own routing or correlation.
+// Request interface accessors use the Req prefix (e.g. ReqPayload) to avoid
+// colliding with the struct's exported field names used for JSON serialization.
+type RequestMessage struct {
+	ID       string            `json:"id"`
+	Created  int64             `json:"created"`  // Unix seconds
+	Deadline int64             `json:"deadline"` // Unix seconds
+	Payload  map[string]any    `json:"payload"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+	Endpoint string            `json:"endpoint,omitempty"`
+}
+
+func (r *RequestMessage) ReqID() string                  { return r.ID }
+func (r *RequestMessage) ReqCreated() int64              { return r.Created }
+func (r *RequestMessage) ReqDeadline() int64             { return r.Deadline }
+func (r *RequestMessage) ReqPayload() map[string]any     { return r.Payload }
+func (r *RequestMessage) ReqMetadata() map[string]string { return r.Metadata }
+func (r *RequestMessage) ReqEndpoint() string            { return r.Endpoint }
+
+// RedisRequest is the concrete Request implementation for Redis-based flows.
+// Per-message queue fields here override producer defaults; producers merge them
+// into InternalRouting on InternalRequest before enqueue.
+type RedisRequest struct {
+	RequestMessage
+	RequestQueueName string `json:"request_queue_name,omitempty"`
+	ResultQueueName  string `json:"result_queue_name,omitempty"`
+}
+
+// PubSubRequest is the concrete Request implementation for GCP Pub/Sub flows.
+// Optional PubSubID is merged into InternalRouting.TransportCorrelationID in producers.
+type PubSubRequest struct {
+	RequestMessage
+	PubSubID string `json:"pubsub_id,omitempty"`
+}
+
+var (
+	_ Request = (*RequestMessage)(nil)
+	_ Request = (*RedisRequest)(nil)
+	_ Request = (*PubSubRequest)(nil)
 )
 
-type Flow interface {
-
-	// Characteristic of the impl
-	Characteristics() Characteristics
-
-	// starts processing requests.
-	Start(ctx context.Context)
-
-	// returns the channels for requests. Implementation is responsible for publishing on these channels.
-	RequestChannels() []RequestChannel
-	// returns the channel that accepts messages to be retries with their backoff delay. Implementation is responsible
-	// for consuming messages on this channel.
-	RetryChannel() chan RetryMessage
-	// returns the channel for storing the results. Implementation is responsible for consuming messages on this channel.
-	ResultChannel() chan ResultMessage
-}
-
-type Characteristics struct {
-	HasExternalBackoff     bool
-	SupportsMessageLatency bool
-}
-
-// DispatchGate defines the interface to determine whether there is enough capacity to forward a request.
-type DispatchGate interface {
-	// Budget returns the Dispatch Budget in the range [0.0, 1.0], representing
-	// the fraction of system capacity available for new requests.
-	// A value of 0.0 indicates no available capacity (system at max allowed).
-	// A value of 1.0 indicates full capacity available (system is idle).
-	// The system always returns a valid value, even in case of internal error.
-	Budget(ctx context.Context) float64
-}
-
-// AttributeGate defines the interface to determine if a request is allowed based on its attributes.
-type AttributeGate interface {
-	// Acquire attempts to acquire quota for the given attributes.
-	// Returns allowed=true if successful, and a release function to be called when processing is complete.
-	// If the gate does not support the given attributes or is not a quota gate, it should return true, nil, nil.
-	Acquire(ctx context.Context, attributes map[string]string) (allowed bool, release func(), err error)
-}
-
-// GateFactory defines the interface for creating DispatchGate instances.
-type GateFactory interface {
-	CreateGate(gateType string, params map[string]string) (DispatchGate, error)
-}
-
-var _ DispatchGate = DispatchGateFunc(nil)
-
-// DispatchGateFunc is a function type that implements DispatchGate.
-// This allows any function with the signature func(context.Context) float64
-// to be used as a DispatchGate.
-type DispatchGateFunc func(context.Context) float64
-
-// Budget implements DispatchGate by calling the function itself.
-func (f DispatchGateFunc) Budget(ctx context.Context) float64 {
-	return f(ctx)
-}
-
-func ConstOpenGate() DispatchGate {
-	return DispatchGateFunc(func(ctx context.Context) float64 { return 1.0 })
-}
-
-type RequestMergePolicy interface {
-	MergeRequestChannels(channels []RequestChannel) EmbelishedRequestChannel
-}
-
-// TODO: Consider per-message metadata map[string]string
-// add endpoint to message level.
-type RequestMessage struct {
-	Id              string            `json:"id"`
-	CreatedUnixSec  string            `json:"created"`               // Unix seconds
-	RetryCount      int               `json:"retry_count,omitempty"` // TODO: Consider
-	DeadlineUnixSec string            `json:"deadline"`              // TODO: check about using int64, change name to timeout
-	Payload         map[string]any    `json:"payload"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
-}
-
-type RequestChannel struct {
-	Channel            chan RequestMessage
-	IGWBaseURl         string
-	InferenceObjective string
-	RequestPathURL     string
-	Gate               DispatchGate // Dispatch gate for this channel, nil defaults to always-open
-}
-
-type EmbelishedRequestChannel struct {
-	Channel chan EmbelishedRequestMessage
-}
-
-type EmbelishedRequestMessage struct {
-	RequestMessage
-	HttpHeaders map[string]string
-	RequestURL  string
-	Metadata    map[string]string
-}
-
-type RetryMessage struct {
-	EmbelishedRequestMessage
-	BackoffDurationSeconds float64
-}
-
-// optional field of httpstatus, golang error?
+// ResultMessage is the async inference result returned to callers. ID and Payload are
+// JSON fields; Routing and Metadata are infrastructure pass-through (json:"-").
 type ResultMessage struct {
-	Id       string            `json:"id"`
+	ID       string            `json:"id"`
 	Payload  string            `json:"payload"`
+	Routing  InternalRouting   `json:"-"`
 	Metadata map[string]string `json:"-"`
 }

@@ -43,7 +43,7 @@ var _ = ginkgo.Describe("Composite Gate E2E", func() {
 
 		result := popResult(ctx, rdb, "result-list")
 		gomega.Expect(result).NotTo(gomega.BeNil())
-		gomega.Expect(result.Id).To(gomega.Equal("composite-1"))
+		gomega.Expect(result.ID).To(gomega.Equal("composite-1"))
 	})
 
 	ginkgo.It("enforces quota limit even when saturation is low", func() {
@@ -79,7 +79,7 @@ var _ = ginkgo.Describe("Composite Gate E2E", func() {
 			return getResultCount(ctx, rdb, "result-list")
 		}, 30*time.Second, 1*time.Second).Should(gomega.BeNumerically(">=", 1))
 		result1 := popResult(ctx, rdb, "result-list")
-		gomega.Expect(result1.Id).To(gomega.Equal("composite-quota-1"))
+		gomega.Expect(result1.ID).To(gomega.Equal("composite-quota-1"))
 
 		// 5. Verify Request 2 is now processed
 		gomega.Eventually(func() []string {
@@ -91,7 +91,7 @@ var _ = ginkgo.Describe("Composite Gate E2E", func() {
 			return getResultCount(ctx, rdb, "result-list")
 		}, 30*time.Second, 1*time.Second).Should(gomega.BeNumerically(">=", 1))
 		result2 := popResult(ctx, rdb, "result-list")
-		gomega.Expect(result2.Id).To(gomega.Equal("composite-quota-2"))
+		gomega.Expect(result2.ID).To(gomega.Equal("composite-quota-2"))
 	})
 
 	ginkgo.It("blocks request when saturation is high even if quota is available", func() {
@@ -117,6 +117,6 @@ var _ = ginkgo.Describe("Composite Gate E2E", func() {
 
 		result := popResult(ctx, rdb, "result-list")
 		gomega.Expect(result).NotTo(gomega.BeNil())
-		gomega.Expect(result.Id).To(gomega.Equal("composite-sat-above"))
+		gomega.Expect(result.ID).To(gomega.Equal("composite-sat-above"))
 	})
 })

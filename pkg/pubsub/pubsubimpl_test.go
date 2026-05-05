@@ -24,7 +24,7 @@ func (m *mockAttributeGate) Acquire(ctx context.Context, attrs map[string]string
 
 func TestProcessMessages_QuotaGating(t *testing.T) {
 	flow := &PubSubMQFlow{}
-	ch := make(chan api.RequestMessage, 1)
+	ch := make(chan *api.InternalRequest, 1)
 
 	tests := []struct {
 		name           string
@@ -63,7 +63,7 @@ func TestProcessMessages_QuotaGating(t *testing.T) {
 			// Since we can't easily create a pubsub.Message with custom Ack/Nack handlers,
 			// we rely on the fact that we can verify if the message was processed.
 
-			msgData, _ := json.Marshal(api.RequestMessage{Id: "test-msg"})
+			msgData, _ := json.Marshal(api.RequestMessage{ID: "test-msg"})
 
 			// Use a custom receive function that yields one message
 			receive := func(ctx context.Context, f func(context.Context, *pubsub.Message)) error {
@@ -91,7 +91,7 @@ func TestProcessMessages_QuotaGating(t *testing.T) {
 					select {
 					case msg := <-ch:
 						// Simulate result worker sending back a result
-						pubsubID := msg.Metadata[PUBSUB_ID]
+						pubsubID := msg.TransportCorrelationID
 						val, _ := resultChannels.Load(pubsubID)
 						resCh := val.(chan bool)
 						resCh <- tt.expectedResult
