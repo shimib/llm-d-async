@@ -269,13 +269,13 @@ func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel cha
 			if err != nil {
 				logger.V(logutil.DEFAULT).Error(err, "Failed to acquire attribute quota")
 				// Re-enqueue the message if acquisition fails
-				member, _ := json.Marshal(rview)
+				member, _ := json.Marshal(ir)
 				r.rdb.ZAdd(ctx, queueName, redis.Z{Score: deadline, Member: string(member)})
 				continue
 			}
 			if !allowed {
 				// Re-enqueue the message (wait for quota)
-				member, _ := json.Marshal(rview)
+				member, _ := json.Marshal(ir)
 				r.rdb.ZAdd(ctx, queueName, redis.Z{Score: deadline, Member: string(member)})
 				continue
 			}
@@ -299,7 +299,9 @@ func (r *RedisSortedSetFlow) processMessages(ctx context.Context, msgChannel cha
 			}); err != nil {
 				logger.V(logutil.DEFAULT).Error(err, "Failed to re-queue message on shutdown", "id", rview.ReqID())
 			}
-
+			if release != nil {
+				release()
+			}
 			return
 		}
 	}
