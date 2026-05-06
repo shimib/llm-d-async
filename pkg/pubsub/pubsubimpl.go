@@ -34,6 +34,8 @@ var (
 	resultChannels sync.Map
 )
 
+const quotaExceededNackDelay = 10 * time.Second
+
 type TopicConfig struct {
 	SubscriberID       string            `json:"subscriber_id"`
 	InferenceObjective string            `json:"inference_objective"`
@@ -320,7 +322,15 @@ func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc,
 				return
 			}
 			if !allowed {
-				msg.Nack()
+				logger.V(logutil.DEBUG).Info("Quota exceeded, delaying Nack", "msgID", msg.ID, "delay", quotaExceededNackDelay)
+				go func() {
+					select {
+					case <-time.After(quotaExceededNackDelay):
+						msg.Nack()
+					case <-ctx.Done():
+						msg.Nack()
+					}
+				}()
 				return
 			}
 			release = rel
