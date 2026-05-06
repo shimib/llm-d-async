@@ -74,8 +74,10 @@ func (g *RedisQuotaGate) acquireConcurrency(ctx context.Context, key string) (bo
 		if current and tonumber(current) >= tonumber(ARGV[1]) then
 			return 0
 		end
-		redis.call("INCR", KEYS[1])
-		redis.call("EXPIRE", KEYS[1], ARGV[2])
+		local new_val = redis.call("INCR", KEYS[1])
+		if tonumber(new_val) == 1 then
+			redis.call("EXPIRE", KEYS[1], ARGV[2])
+		end
 		return 1
 	`
 	// TTL is window size, or a default 5m if window is 0
@@ -95,7 +97,13 @@ func (g *RedisQuotaGate) acquireConcurrency(ctx context.Context, key string) (bo
 
 	release := func() {
 		// Use a background context for release to ensure it runs even if the request context is canceled
-		err := g.rdb.Decr(context.Background(), key).Err()
+		releaseScript := `
+			local current = redis.call("GET", KEYS[1])
+			if current and tonumber(current) > 0 then
+				redis.call("DECR", KEYS[1])
+			end
+		`
+		err := g.rdb.Eval(context.Background(), releaseScript, []string{key}).Err()
 		if err != nil {
 			log.Log.Error(err, "Failed to release concurrency quota", "key", key)
 		}
