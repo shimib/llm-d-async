@@ -62,6 +62,9 @@ func (r *RandomRobinPolicy) MergeRequestChannels(channels []pipeline.RequestChan
 				for k, v := range ir.PublicRequest.ReqHeaders() {
 					headers[k] = v
 				}
+				if ir.InternalRouting.InferenceObjective != "" {
+					headers["x-gateway-inference-objective"] = ir.InternalRouting.InferenceObjective
+				}
 				erm := pipeline.EmbelishedRequestMessage{
 					InternalRequest: ir,
 					HttpHeaders:     headers,

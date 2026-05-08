@@ -315,7 +315,7 @@ func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc,
 		// Per-attribute gating
 		var release func()
 		if attrGate, ok := gate.(pipeline.AttributeGate); ok {
-			allowed, rel, err := attrGate.Acquire(ctx, msg.Attributes)
+			allowed, obj, rel, err := attrGate.Acquire(ctx, msg.Attributes)
 			if err != nil {
 				logger.V(logutil.DEFAULT).Error(err, "Failed to acquire attribute quota")
 				msg.Nack()
@@ -332,6 +332,12 @@ func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc,
 					}
 				}()
 				return
+			}
+			if obj != "" {
+				ir.InternalRouting.InferenceObjective = obj
+			} else if userObj, ok := msg.Attributes["inferenceobjective"]; ok {
+				// Fallback to user attribute if gate didn't provide one
+				ir.InternalRouting.InferenceObjective = userObj
 			}
 			release = rel
 		} else {

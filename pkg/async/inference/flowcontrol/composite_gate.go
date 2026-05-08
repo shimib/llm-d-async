@@ -58,8 +58,9 @@ func (c *CompositeGate) Budget(ctx context.Context) float64 {
 // Acquire implements AttributeGate.
 // It attempts to acquire quota across all inner AttributeGates.
 // If any gate denies the request or fails, it releases the quota acquired from previous gates.
-func (c *CompositeGate) Acquire(ctx context.Context, attributes map[string]string) (bool, func(), error) {
+func (c *CompositeGate) Acquire(ctx context.Context, attributes map[string]string) (bool, string, func(), error) {
 	var releases []func()
+	var finalObjective string
 	releaseAll := func() {
 		for i := len(releases) - 1; i >= 0; i-- {
 			releases[i]()
@@ -68,14 +69,17 @@ func (c *CompositeGate) Acquire(ctx context.Context, attributes map[string]strin
 
 	for _, gate := range c.gates {
 		if attrGate, ok := gate.(pipeline.AttributeGate); ok {
-			allowed, release, err := attrGate.Acquire(ctx, attributes)
+			allowed, obj, release, err := attrGate.Acquire(ctx, attributes)
 			if err != nil {
 				releaseAll()
-				return false, nil, err
+				return false, "", nil, err
 			}
 			if !allowed {
 				releaseAll()
-				return false, nil, nil
+				return false, "", nil, nil
+			}
+			if obj != "" {
+				finalObjective = obj
 			}
 			if release != nil {
 				releases = append(releases, release)
@@ -83,5 +87,5 @@ func (c *CompositeGate) Acquire(ctx context.Context, attributes map[string]strin
 		}
 	}
 
-	return true, releaseAll, nil
+	return true, finalObjective, releaseAll, nil
 }

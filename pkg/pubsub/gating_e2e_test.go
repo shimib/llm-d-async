@@ -42,7 +42,7 @@ func TestGating_EndToEnd(t *testing.T) {
 	}
 
 	t.Run("Concurrency Gating", func(t *testing.T) {
-		gate := redisgate.NewRedisQuotaGate(rdb, "userid", redisgate.QuotaModeConcurrency, 1, 10*time.Second, "e2e-concurrency:")
+		gate := redisgate.NewRedisQuotaGate(rdb, "userid", redisgate.QuotaModeConcurrency, redisgate.QuotaStrategyBlock, 1, 10*time.Second, "e2e-concurrency:", -1)
 
 		// 1. Send Request 1 for User A
 		msg1 := createMsg("req-1", "user-a")
@@ -126,7 +126,7 @@ func TestGating_EndToEnd(t *testing.T) {
 
 	t.Run("Rate Limit Gating", func(t *testing.T) {
 		// 2 requests per 2 seconds
-		gate := redisgate.NewRedisQuotaGate(rdb, "userid", redisgate.QuotaModeRateLimit, 2, 2*time.Second, "e2e-ratelimit:")
+		gate := redisgate.NewRedisQuotaGate(rdb, "userid", redisgate.QuotaModeRateLimit, redisgate.QuotaStrategyBlock, 2, 2*time.Second, "e2e-ratelimit:", -1)
 
 		// Send 2 allowed requests
 		for i := 1; i <= 2; i++ {

@@ -294,6 +294,45 @@ func TestPerRequestHeadersMerged(t *testing.T) {
 	}
 }
 
+func TestInferenceObjectiveOverride(t *testing.T) {
+	ch := pipeline.RequestChannel{
+		Channel:            make(chan *api.InternalRequest, 2),
+		IGWBaseURL:         "http://gw",
+		InferenceObjective: "default-obj",
+		RequestPathURL:     "/v1/completions",
+	}
+	policy := NewRandomRobinPolicy()
+
+	// 1st message: using InternalRouting override
+	ir1 := irID("msg1")
+	ir1.InternalRouting.InferenceObjective = "override-obj"
+	ch.Channel <- ir1
+
+	// 2nd message: using default
+	ch.Channel <- irID("msg2")
+	close(ch.Channel)
+
+	merged := policy.MergeRequestChannels([]pipeline.RequestChannel{ch})
+
+	deadline := time.After(2 * time.Second)
+	results := map[string]string{}
+	for range 2 {
+		select {
+		case msg := <-merged.Channel:
+			results[msg.PublicRequest.ReqID()] = msg.HttpHeaders["x-gateway-inference-objective"]
+		case <-deadline:
+			t.Fatal("timed out")
+		}
+	}
+
+	if results["msg1"] != "override-obj" {
+		t.Errorf("expected override-obj, got %s", results["msg1"])
+	}
+	if results["msg2"] != "default-obj" {
+		t.Errorf("expected default-obj, got %s", results["msg2"])
+	}
+}
+
 func TestMergedChannelIsBuffered(t *testing.T) {
 	numChannels := 3
 	channels := make([]pipeline.RequestChannel, numChannels)

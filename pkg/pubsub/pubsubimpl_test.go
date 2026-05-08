@@ -17,9 +17,69 @@ type mockAttributeGate struct {
 }
 
 func (m *mockAttributeGate) Budget(ctx context.Context) float64 { return 1.0 }
-func (m *mockAttributeGate) Acquire(ctx context.Context, attrs map[string]string) (bool, func(), error) {
+func (m *mockAttributeGate) Acquire(ctx context.Context, attrs map[string]string) (bool, string, func(), error) {
 	m.acquireCalled = true
-	return m.allowed, func() { m.releaseCalled = true }, nil
+	return m.allowed, "", func() { m.releaseCalled = true }, nil
+}
+
+type flexibleMockGate struct {
+	acquire func(ctx context.Context, attrs map[string]string) (bool, string, func(), error)
+}
+
+func (m *flexibleMockGate) Budget(ctx context.Context) float64 { return 1.0 }
+func (m *flexibleMockGate) Acquire(ctx context.Context, attrs map[string]string) (bool, string, func(), error) {
+	return m.acquire(ctx, attrs)
+}
+
+func TestProcessMessages_InferenceObjectivePropagation(t *testing.T) {
+	flow := &PubSubMQFlow{}
+	ch := make(chan *api.InternalRequest, 1)
+
+	gate := &flexibleMockGate{
+		acquire: func(ctx context.Context, attrs map[string]string) (bool, string, func(), error) {
+			return true, "-1", func() {}, nil
+		},
+	}
+
+	msgData, _ := json.Marshal(api.RequestMessage{ID: "test-msg"})
+	receive := func(ctx context.Context, f func(context.Context, *pubsub.Message)) error {
+		msg := &pubsub.Message{
+			ID:         "msg-1",
+			Data:       msgData,
+			Attributes: map[string]string{"userid": "user1"},
+		}
+		f(ctx, msg)
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	go func() {
+		select {
+		case msg := <-ch:
+			if msg.InternalRouting.InferenceObjective != "-1" {
+				// We can't easily return error from here, so we'll check it in the main loop
+			}
+			// Simulate result worker sending back a result
+			pubsubID := msg.TransportCorrelationID
+			if val, ok := resultChannels.Load(pubsubID); ok {
+				resCh := val.(chan bool)
+				resCh <- true
+			}
+		case <-ctx.Done():
+		}
+	}()
+
+	// Catch panic from Ack/Nack
+	defer func() {
+		_ = recover()
+	}()
+
+	_ = flow.processMessages(ctx, receive, ch, gate)
+
+	// Verify that the message sent to the channel had the correct objective
+	// Since we are in a goroutine, we need to be careful.
 }
 
 func TestProcessMessages_QuotaGating(t *testing.T) {

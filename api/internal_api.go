@@ -17,6 +17,7 @@ type InternalRouting struct {
 	RequestQueueName       string `json:"request_queue_name,omitempty"`
 	ResultQueueName        string `json:"result_queue_name,omitempty"`
 	TransportCorrelationID string `json:"transport_correlation_id,omitempty"`
+	InferenceObjective     string `json:"inference_objective,omitempty"`
 }
 
 // InternalRequest is the internal envelope: routing data plus a concrete Request.

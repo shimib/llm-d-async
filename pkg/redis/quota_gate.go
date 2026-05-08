@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/llm-d-incubation/llm-d-async/pipeline"
@@ -20,23 +21,34 @@ const (
 	QuotaModeConcurrency QuotaMode = "concurrency"
 )
 
+type QuotaStrategy string
+
+const (
+	QuotaStrategyBlock    QuotaStrategy = "block"
+	QuotaStrategyClassify QuotaStrategy = "classify"
+)
+
 type RedisQuotaGate struct {
-	rdb       *redis.Client
-	attribute string
-	mode      QuotaMode
-	limit     int
-	window    time.Duration
-	prefix    string
+	rdb         *redis.Client
+	attribute   string
+	mode        QuotaMode
+	strategy    QuotaStrategy
+	limit       int
+	window      time.Duration
+	prefix      string
+	overflowObj int
 }
 
-func NewRedisQuotaGate(client *redis.Client, attribute string, mode QuotaMode, limit int, window time.Duration, prefix string) *RedisQuotaGate {
+func NewRedisQuotaGate(client *redis.Client, attribute string, mode QuotaMode, strategy QuotaStrategy, limit int, window time.Duration, prefix string, overflowObj int) *RedisQuotaGate {
 	return &RedisQuotaGate{
-		rdb:       client,
-		attribute: attribute,
-		mode:      mode,
-		limit:     limit,
-		window:    window,
-		prefix:    prefix,
+		rdb:         client,
+		attribute:   attribute,
+		mode:        mode,
+		strategy:    strategy,
+		limit:       limit,
+		window:      window,
+		prefix:      prefix,
+		overflowObj: overflowObj,
 	}
 }
 
@@ -47,24 +59,46 @@ func (g *RedisQuotaGate) Budget(ctx context.Context) float64 {
 }
 
 // Acquire implements api.AttributeGate.
-func (g *RedisQuotaGate) Acquire(ctx context.Context, attributes map[string]string) (bool, func(), error) {
+func (g *RedisQuotaGate) Acquire(ctx context.Context, attributes map[string]string) (bool, string, func(), error) {
 	val, ok := attributes[g.attribute]
 	if !ok {
 		// If the attribute is missing, we allow it by default (or we could reject it).
 		// For now, let's allow it but log a warning.
-		return true, func() {}, nil
+		return true, "", func() {}, nil
 	}
 
 	key := fmt.Sprintf("%s%s:%s", g.prefix, g.attribute, val)
 
+	var allowed bool
+	var release func()
+	var err error
+
 	switch g.mode {
 	case QuotaModeConcurrency:
-		return g.acquireConcurrency(ctx, key)
+		allowed, release, err = g.acquireConcurrency(ctx, key)
 	case QuotaModeRateLimit:
-		return g.acquireRateLimit(ctx, key)
+		allowed, release, err = g.acquireRateLimit(ctx, key)
 	default:
-		return true, func() {}, nil
+		allowed, release, err = true, func() {}, nil
 	}
+
+	if err != nil {
+		return false, "", nil, err
+	}
+
+	var objective string
+	if g.strategy == QuotaStrategyClassify {
+		if allowed {
+			objective = "" // Let queue/topic default apply
+		} else {
+			objective = strconv.Itoa(g.overflowObj)
+			// In classify mode, we always allow the request but tag it as overflow.
+			allowed = true
+			release = func() {}
+		}
+	}
+
+	return allowed, objective, release, nil
 }
 
 func (g *RedisQuotaGate) acquireConcurrency(ctx context.Context, key string) (bool, func(), error) {

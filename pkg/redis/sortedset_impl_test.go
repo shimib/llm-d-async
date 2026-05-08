@@ -890,3 +890,56 @@ func TestSortedSetFlow_RequestWorkerRequeuesOnShutdown(t *testing.T) {
 		t.Errorf("Expected re-queued message id requeue-1, got %s", restored.PublicRequest.ReqID())
 	}
 }
+
+func TestSortedSetFlow_InferenceObjectivePropagation(t *testing.T) {
+	s, rdb, ctx, cancel := setupTest(t)
+	defer s.Close()
+	defer rdb.Close() // nolint:errcheck
+	defer cancel()
+
+	queue := "classify-queue"
+	gate := &flexibleMockGate{
+		acquire: func(ctx context.Context, attrs map[string]string) (bool, string, func(), error) {
+			return true, "-1", func() {}, nil
+		},
+	}
+
+	flow := &RedisSortedSetFlow{
+		rdb: rdb,
+		requestChannels: []requestChannelData{{
+			channel:   pipeline.RequestChannel{Channel: make(chan *api.InternalRequest, 1)},
+			queueName: queue,
+		}},
+		pollInterval: 50 * time.Millisecond,
+		batchSize:    10,
+		gate:         gate,
+	}
+
+	msg := api.RequestMessage{
+		ID:       "msg-classify",
+		Created:  time.Now().Unix(),
+		Deadline: 9999999999,
+		Metadata: map[string]string{"userid": "user1"},
+	}
+	rdb.ZAdd(ctx, queue, redis.Z{Score: float64(time.Now().Unix()), Member: envelopeJSON(msg)})
+
+	go flow.requestWorker(ctx, flow.requestChannels[0].channel.Channel, queue)
+
+	select {
+	case received := <-flow.requestChannels[0].channel.Channel:
+		if received.InternalRouting.InferenceObjective != "-1" {
+			t.Errorf("Expected inferenceobjective=-1, got %s", received.InternalRouting.InferenceObjective)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for message")
+	}
+}
+
+type flexibleMockGate struct {
+	acquire func(ctx context.Context, attrs map[string]string) (bool, string, func(), error)
+}
+
+func (m *flexibleMockGate) Budget(ctx context.Context) float64 { return 1.0 }
+func (m *flexibleMockGate) Acquire(ctx context.Context, attrs map[string]string) (bool, string, func(), error) {
+	return m.acquire(ctx, attrs)
+}

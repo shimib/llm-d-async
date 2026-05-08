@@ -147,9 +147,23 @@ func (f *GateFactory) CreateGate(gateType string, params map[string]string) (pip
 			mode = redisgate.QuotaModeRateLimit
 		}
 
+		strategy := redisgate.QuotaStrategy(params["strategy"])
+		if strategy == "" {
+			strategy = redisgate.QuotaStrategyBlock
+		}
+
 		limit, err := strconv.Atoi(params["limit"])
 		if err != nil {
 			return nil, fmt.Errorf("redis-quota gate requires a valid 'limit': %w", err)
+		}
+
+		overflowObj := -1
+		if overflowObjStr := params["overflow_objective"]; overflowObjStr != "" {
+			if val, err := strconv.Atoi(overflowObjStr); err == nil {
+				overflowObj = val
+			} else {
+				return nil, fmt.Errorf("invalid overflow_objective: %w", err)
+			}
 		}
 
 		windowStr := params["window"]
@@ -166,7 +180,7 @@ func (f *GateFactory) CreateGate(gateType string, params map[string]string) (pip
 			prefix = "quota:"
 		}
 
-		return redisgate.NewRedisQuotaGate(client, attr, mode, limit, window, prefix), nil
+		return redisgate.NewRedisQuotaGate(client, attr, mode, strategy, limit, window, prefix, overflowObj), nil
 
 	case "prometheus-saturation":
 		if f.prometheusURL == "" {

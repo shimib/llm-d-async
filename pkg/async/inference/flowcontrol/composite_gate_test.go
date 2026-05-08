@@ -40,15 +40,15 @@ type mockAttributeGate struct {
 	release bool
 }
 
-func (m *mockAttributeGate) Acquire(ctx context.Context, attributes map[string]string) (bool, func(), error) {
+func (m *mockAttributeGate) Acquire(ctx context.Context, attributes map[string]string) (bool, string, func(), error) {
 	m.calls++
 	if m.err != nil {
-		return false, nil, m.err
+		return false, "", nil, m.err
 	}
 	if !m.allowed {
-		return false, nil, nil
+		return false, "", nil, nil
 	}
-	return true, func() { m.release = true }, nil
+	return true, "", func() { m.release = true }, nil
 }
 
 func TestCompositeGate_Budget(t *testing.T) {
@@ -79,7 +79,7 @@ func TestCompositeGate_Acquire(t *testing.T) {
 		gate := NewCompositeGate(
 			&mockDispatchGate{budget: 0.5},
 		)
-		allowed, release, err := gate.Acquire(context.Background(), nil)
+		allowed, _, release, err := gate.Acquire(context.Background(), nil)
 		assert.True(t, allowed)
 		assert.NoError(t, err)
 		assert.NotNil(t, release)
@@ -91,7 +91,7 @@ func TestCompositeGate_Acquire(t *testing.T) {
 		gate2 := &mockAttributeGate{allowed: true}
 		gate := NewCompositeGate(gate1, gate2)
 
-		allowed, release, err := gate.Acquire(context.Background(), nil)
+		allowed, _, release, err := gate.Acquire(context.Background(), nil)
 		assert.True(t, allowed)
 		assert.NoError(t, err)
 		assert.NotNil(t, release)
@@ -107,7 +107,7 @@ func TestCompositeGate_Acquire(t *testing.T) {
 		gate3 := &mockAttributeGate{allowed: true}
 		gate := NewCompositeGate(gate1, gate2, gate3)
 
-		allowed, release, err := gate.Acquire(context.Background(), nil)
+		allowed, _, release, err := gate.Acquire(context.Background(), nil)
 		assert.False(t, allowed)
 		assert.NoError(t, err)
 		assert.Nil(t, release)
@@ -123,7 +123,7 @@ func TestCompositeGate_Acquire(t *testing.T) {
 		gate2 := &mockAttributeGate{err: errors.New("test error")}
 		gate := NewCompositeGate(gate1, gate2)
 
-		allowed, release, err := gate.Acquire(context.Background(), nil)
+		allowed, _, release, err := gate.Acquire(context.Background(), nil)
 		assert.False(t, allowed)
 		assert.Error(t, err)
 		assert.Nil(t, release)
