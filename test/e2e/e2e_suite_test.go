@@ -132,6 +132,20 @@ func detectContainerRuntime() string {
 	return "docker"
 }
 
+func pullIfMissing(image string) {
+	inspectCmd := exec.Command(containerRuntime, "image", "inspect", image)
+	if err := inspectCmd.Run(); err == nil {
+		ginkgo.By("Image " + image + " already exists locally, skipping pull")
+		return
+	}
+
+	ginkgo.By("Pulling image " + image)
+	command := exec.Command(containerRuntime, "pull", image)
+	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+}
+
 func setupK8sCluster() {
 	kindKubeconfig = filepath.Join(os.TempDir(), "kind-kubeconfig-"+kindClusterName)
 
@@ -174,11 +188,7 @@ func setupK8sCluster() {
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 	} else {
-		ginkgo.By("Pulling EPP image " + eppImage)
-		command = exec.Command(containerRuntime, "pull", eppImage)
-		session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-		gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+		pullIfMissing(eppImage)
 	}
 
 	if simRoot != "" {
@@ -188,36 +198,20 @@ func setupK8sCluster() {
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 	} else {
-		ginkgo.By("Pulling sim image " + simImage)
-		command = exec.Command(containerRuntime, "pull", simImage)
-		session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-		gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+		pullIfMissing(simImage)
 	}
 
 	kindLoadImage(apImage)
 	kindLoadImage(eppImage)
 	kindLoadImage(simImage)
 
-	ginkgo.By("Pulling redis:7-alpine")
-	command = exec.Command(containerRuntime, "pull", "redis:7-alpine")
-	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(300 * time.Second).Should(gexec.Exit(0))
+	pullIfMissing("redis:7-alpine")
 	kindLoadImage("redis:7-alpine")
 
-	ginkgo.By("Pulling docker.io/envoyproxy/envoy:distroless-v1.33.2")
-	command = exec.Command(containerRuntime, "pull", "docker.io/envoyproxy/envoy:distroless-v1.33.2")
-	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(300 * time.Second).Should(gexec.Exit(0))
+	pullIfMissing("docker.io/envoyproxy/envoy:distroless-v1.33.2")
 	kindLoadImage("docker.io/envoyproxy/envoy:distroless-v1.33.2")
 
-	ginkgo.By("Pulling prom/prometheus:v2.53.0")
-	command = exec.Command(containerRuntime, "pull", "prom/prometheus:v2.53.0")
-	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(300 * time.Second).Should(gexec.Exit(0))
+	pullIfMissing("prom/prometheus:v2.53.0")
 	kindLoadImage("prom/prometheus:v2.53.0")
 
 	// The sim image is pulled with imagePullPolicy: Always directly by the cluster.
