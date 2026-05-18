@@ -74,6 +74,17 @@ func Worker(ctx context.Context, characteristics pipeline.Characteristics, clien
 					return
 				}
 
+				// Shutdown: parent context cancelled and the error is context-related
+				// (not a completed HTTP response like 4xx). Re-enqueue directly —
+				// retryMessage's select would take ctx.Done() immediately.
+				if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+					retryChannel <- pipeline.RetryMessage{
+						EmbelishedRequestMessage: msg,
+						BackoffDurationSeconds:   0,
+					}
+					return
+				}
+
 				// Check if error implements InferenceError
 				var inferenceErr asyncapi.InferenceError
 				if !errors.As(err, &inferenceErr) || inferenceErr.Category().Fatal() {
