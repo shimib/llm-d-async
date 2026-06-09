@@ -236,7 +236,9 @@ func (r *PubSubMQFlow) Shutdown() {
 // approximate and lags real time by the metric's sampling interval.
 func (r *PubSubMQFlow) QueueBacklog(ctx context.Context) ([]pipeline.QueueBacklogStat, error) {
 	if r.metricClient == nil {
-		return nil, fmt.Errorf("cloud monitoring client unavailable")
+		// Backlog reporting was disabled at startup (already logged when the
+		// client failed to initialize); no-op rather than erroring every poll.
+		return nil, nil
 	}
 	now := time.Now()
 	interval := &monitoringpb.TimeInterval{
@@ -260,7 +262,10 @@ func (r *PubSubMQFlow) QueueBacklog(ctx context.Context) ([]pipeline.QueueBacklo
 		ts, err := it.Next()
 		if err != nil {
 			if errors.Is(err, iterator.Done) {
-				// No data point in the window; treat as unknown, skip.
+				// No sample in the window: for a configured subscription this
+				// normally means it has drained. Report 0 so the gauge does not
+				// retain a stale (high) value after the queue empties.
+				stats = append(stats, pipeline.QueueBacklogStat{QueueName: subID})
 				continue
 			}
 			if firstErr == nil {
@@ -270,6 +275,7 @@ func (r *PubSubMQFlow) QueueBacklog(ctx context.Context) ([]pipeline.QueueBacklo
 		}
 		points := ts.GetPoints()
 		if len(points) == 0 {
+			stats = append(stats, pipeline.QueueBacklogStat{QueueName: subID})
 			continue
 		}
 		// Points are returned newest-first; the first is the latest sample.
@@ -392,7 +398,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 			continue
 		}
 
-		err := r.processMessages(receiveCtx, sub.Receive, ch, gate)
+		err := r.processMessages(receiveCtx, sub.Receive, subscriberID, ch, gate)
 
 		cancel()
 		// TODO
@@ -405,7 +411,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 
 type receiveFunc func(context.Context, func(context.Context, *pubsub.Message)) error
 
-func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc, ch chan *api.InternalRequest, gate pipeline.DispatchGate) error {
+func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc, subscriberID string, ch chan *api.InternalRequest, gate pipeline.DispatchGate) error {
 	logger := log.FromContext(ctx)
 	return receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
 
@@ -417,7 +423,10 @@ func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc,
 			return
 		}
 
-		irout := api.InternalRouting{TransportCorrelationID: msg.ID}
+		// Carry the subscription as the request queue label so all per-queue
+		// metrics (throughput, depth, inflight, latency) align with the
+		// async_broker_backlog gauge, which is keyed by subscription ID.
+		irout := api.InternalRouting{TransportCorrelationID: msg.ID, RequestQueueName: subscriberID}
 		if msg.DeliveryAttempt != nil {
 			irout.RetryCount = *msg.DeliveryAttempt - 1
 		}
