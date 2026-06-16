@@ -56,8 +56,27 @@ var (
 	}, queueLabels)
 	QueueResidenceTime = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Subsystem: SchedulerSubsystem, Name: "async_queue_residence_time_millis",
-		Help:    "Time a message spent buffered in-process from broker ingestion until a worker pulled it (the async delay introduced by the system).",
-		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000},
+		Help: "Time a message spent buffered in-process from broker ingestion until a worker pulled it (the async delay introduced by the system).",
+		// Residence time can range from sub-second up to a full day under
+		// sustained backlog, so buckets span 500ms (smallest) to 24h, all in ms.
+		Buckets: []float64{
+			500,      // 500ms
+			1000,     // 1s
+			2000,     // 2s
+			5000,     // 5s
+			10000,    // 10s
+			30000,    // 30s
+			60000,    // 1m
+			120000,   // 2m
+			300000,   // 5m
+			600000,   // 10m
+			1800000,  // 30m
+			3600000,  // 1h
+			7200000,  // 2h
+			21600000, // 6h
+			43200000, // 12h
+			86400000, // 24h
+		},
 	}, queueLabels)
 	QueueDepth = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Subsystem: SchedulerSubsystem, Name: "async_queue_depth",
