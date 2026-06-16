@@ -19,7 +19,9 @@ import (
 	"github.com/llm-d-incubation/llm-d-async/pkg/async"
 	"github.com/llm-d-incubation/llm-d-async/pkg/async/inference/flowcontrol"
 	"github.com/llm-d-incubation/llm-d-async/pkg/asyncworker"
+	"github.com/llm-d-incubation/llm-d-async/pkg/asyncworker/transform"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
+	"github.com/llm-d-incubation/llm-d-async/pkg/plugins"
 	"github.com/llm-d-incubation/llm-d-async/pkg/pubsub"
 	"github.com/llm-d-incubation/llm-d-async/pkg/redis"
 	"github.com/llm-d-incubation/llm-d-async/pkg/version"
@@ -56,6 +58,7 @@ func main() {
 	var tlsKey string
 	var tlsInsecureSkipVerify bool
 	var poolConfigFile string
+	var transformConfigFile string
 
 	flag.IntVar(&loggerVerbosity, "v", logging.DEFAULT, "number for the log level verbosity")
 
@@ -78,6 +81,7 @@ func main() {
 	flag.StringVar(&tlsKey, "tls-key", "", "Path to client key file (PEM) for mTLS")
 	flag.BoolVar(&tlsInsecureSkipVerify, "tls-insecure-skip-verify", false, "Skip TLS certificate verification (dev/test only)")
 	flag.StringVar(&poolConfigFile, "pool-config-file", "", "Path to the pools configuration JSON file")
+	flag.StringVar(&transformConfigFile, "transform-config-file", "", "Path to the request body-transform plugins configuration JSON file (empty disables transforms)")
 
 	var prometheusURL = flag.String("prometheus-url", "", "Prometheus server URL for metric-based gates (e.g., http://localhost:9090)")
 
@@ -261,6 +265,24 @@ func main() {
 	)}
 	inferenceClient := asyncworker.NewHTTPInferenceClient(inferenceHTTPClient)
 
+	// Build the request body-transform chain from configuration. When no config
+	// file is provided the chain is nil and the worker preserves the default
+	// JSON dispatch path unchanged.
+	var transforms *transform.Chain
+	if transformConfigFile != "" {
+		specs, err := transform.LoadConfig(transformConfigFile)
+		if err != nil {
+			setupLog.Error(err, "Failed to load transform configuration file")
+			os.Exit(1)
+		}
+		transforms, err = transform.BuildChain(specs, plugins.NewHandle(signalCtx))
+		if err != nil {
+			setupLog.Error(err, "Failed to build request transform chain")
+			os.Exit(1)
+		}
+		setupLog.Info("Loaded request transform plugins", "count", transforms.Len())
+	}
+
 	dispatch := policy.MergeRequestChannels(impl.RequestChannels(), poolsMap)
 
 	var wg sync.WaitGroup
@@ -277,7 +299,7 @@ func main() {
 			wg.Add(1)
 			go func(mergedChan chan pipeline.EmbelishedRequestMessage) {
 				defer wg.Done()
-				asyncworker.Worker(signalCtx, drainCtx, impl.Characteristics(), inferenceClient, mergedChan, impl.RetryChannel(), impl.ResultChannel(), requestTimeout)
+				asyncworker.Worker(signalCtx, drainCtx, impl.Characteristics(), inferenceClient, mergedChan, impl.RetryChannel(), impl.ResultChannel(), requestTimeout, transforms)
 			}(mergedChan)
 		}
 	}

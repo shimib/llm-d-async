@@ -134,7 +134,7 @@ func TestSheddedRequest(t *testing.T) {
 	resultChannel := make(chan asyncapi.ResultMessage, 1)
 	ctx := context.Background()
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 	deadline := time.Now().Add(time.Second * 100).Unix()
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
@@ -170,7 +170,7 @@ func TestSuccessfulRequest(t *testing.T) {
 	resultChannel := make(chan asyncapi.ResultMessage, 1)
 	ctx := context.Background()
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	deadline := time.Now().Add(time.Second * 100).Unix()
 
@@ -204,7 +204,7 @@ func TestFatalError_NoRetry(t *testing.T) {
 	resultChannel := make(chan asyncapi.ResultMessage, 1)
 	ctx := context.Background()
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	deadline := time.Now().Add(time.Second * 100).Unix()
 
@@ -250,7 +250,7 @@ func TestRateLimitRequest(t *testing.T) {
 	resultChannel := make(chan asyncapi.ResultMessage, 1)
 	ctx := context.Background()
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 	deadline := time.Now().Add(time.Second * 100).Unix()
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
@@ -286,7 +286,7 @@ func TestRequestTimeout(t *testing.T) {
 	ctx := context.Background()
 
 	// Use a very short request timeout to trigger the deadline.
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, 100*time.Millisecond)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, 100*time.Millisecond, nil)
 	deadline := time.Now().Add(time.Second * 100).Unix()
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
@@ -519,7 +519,7 @@ func TestRateLimitRequest_WithRetryAfterHeader(t *testing.T) {
 	resultChannel := make(chan asyncapi.ResultMessage, 1)
 	ctx := context.Background()
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 	deadline := time.Now().Add(time.Second * 100).Unix()
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
@@ -559,7 +559,7 @@ func TestValidateAndMarshal_cancelledCtxDoesNotBlock(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		validateAndMarshal(ctx, resultChannel, emb)
+		validateAndMarshal(ctx, resultChannel, emb, nil)
 		close(done)
 	}()
 
@@ -617,7 +617,7 @@ func TestWorker_cancelledCtxExitsPromptly(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+		Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 		close(done)
 	}()
 
@@ -657,7 +657,7 @@ func TestClientError_NoRetry(t *testing.T) {
 	resultChannel := make(chan asyncapi.ResultMessage, 1)
 	ctx := context.Background()
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 	deadline := time.Now().Add(time.Second * 100).Unix()
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
@@ -698,7 +698,7 @@ func TestWorker_RetriesOnShutdown(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
 		ID:       msgId,
@@ -768,7 +768,7 @@ func TestWorker_DrainsBufferedMessagesOnShutdown(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+					Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 				}()
 			}
 
@@ -877,7 +877,7 @@ func TestMetrics_QueueDepthAndInflightBalance(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
 
-			go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+			go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 			// Simulate the merge policy's increment for one buffered request.
 			metrics.IncQueueDepth(queueID, queueName, "test-pool")
@@ -955,7 +955,7 @@ func TestMetrics_QueueDepthDecrementsOnDrain(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+		Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 		close(done)
 	}()
 
@@ -998,7 +998,7 @@ func TestMetrics_SuccessfulRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmbR(asyncapi.InternalRouting{
 		QueueID:          queueID,
@@ -1048,7 +1048,7 @@ func TestMetrics_RateLimited(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmbR(asyncapi.InternalRouting{
 		QueueID:          queueID,
@@ -1088,7 +1088,7 @@ func TestMetrics_FatalError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmbR(asyncapi.InternalRouting{
 		QueueID:          queueID,
@@ -1128,7 +1128,7 @@ func TestMetrics_DeadlineExceeded(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmbR(asyncapi.InternalRouting{
 		QueueID:          queueID,
@@ -1165,7 +1165,7 @@ func TestMetrics_LabelsIsolated(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	deadline := time.Now().Add(100 * time.Second).Unix()
 
@@ -1249,7 +1249,7 @@ func TestWorker_SpanOnSuccess(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
 		ID: "span-success", Created: time.Now().Unix(), Deadline: time.Now().Add(100 * time.Second).Unix(),
@@ -1290,7 +1290,7 @@ func TestWorker_SpanOnFatalError(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
 		ID: "span-fatal", Created: time.Now().Unix(), Deadline: time.Now().Add(100 * time.Second).Unix(),
@@ -1331,7 +1331,7 @@ func TestWorker_SpanOnRetryableError(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
 		ID: "span-429", Created: time.Now().Unix(), Deadline: time.Now().Add(100 * time.Second).Unix(),
@@ -1369,7 +1369,7 @@ func TestWorker_SpanOnServerError(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
 		ID: "span-500", Created: time.Now().Unix(), Deadline: time.Now().Add(100 * time.Second).Unix(),
@@ -1412,7 +1412,7 @@ func TestWorker_TraceContextExtraction(t *testing.T) {
 	otel.GetTextMapPropagator().Inject(parentCtx, propagation.MapCarrier(metadata))
 	parentSpan.End()
 
-	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
 		ID: "span-ctx", Created: time.Now().Unix(), Deadline: time.Now().Add(100 * time.Second).Unix(),
@@ -1451,7 +1451,7 @@ func TestWorker_SpanOnShutdownReenqueue(t *testing.T) {
 	resultChannel := make(chan asyncapi.ResultMessage, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmb(asyncapi.RequestMessage{
 		ID: "span-shutdown", Created: time.Now().Unix(), Deadline: time.Now().Add(5 * time.Minute).Unix(),
@@ -1507,7 +1507,7 @@ func TestWorker_SpanIncludesQueueName(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+	go Worker(ctx, ctx, pipeline.Characteristics{}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 
 	requestChannel <- newEmbR(
 		asyncapi.InternalRouting{QueueID: "my-test-qid", RequestQueueName: "my-test-queue"},
@@ -1559,7 +1559,7 @@ func TestWorker_InFlightCompletesOnConsumeCancel(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+		Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 		close(done)
 	}()
 
@@ -1621,7 +1621,7 @@ func TestWorker_DrainTimeoutCancelsInFlight(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+		Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 		close(done)
 	}()
 
@@ -1689,7 +1689,7 @@ func TestWorker_DrainWithCancelledRequestCtx(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
+		Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout, nil)
 		close(done)
 	}()
 

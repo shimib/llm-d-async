@@ -12,6 +12,7 @@ import (
 	asyncapi "github.com/llm-d-incubation/llm-d-async/api"
 	uotel "github.com/llm-d-incubation/llm-d-async/internal/otel"
 	"github.com/llm-d-incubation/llm-d-async/pipeline"
+	"github.com/llm-d-incubation/llm-d-async/pkg/asyncworker/transform"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -28,7 +29,7 @@ const (
 )
 
 func Worker(consumeCtx, requestCtx context.Context, characteristics pipeline.Characteristics, client asyncapi.InferenceClient, requestChannel chan pipeline.EmbelishedRequestMessage,
-	retryChannel chan pipeline.RetryMessage, resultChannel chan asyncapi.ResultMessage, requestTimeout time.Duration) {
+	retryChannel chan pipeline.RetryMessage, resultChannel chan asyncapi.ResultMessage, requestTimeout time.Duration, transforms *transform.Chain) {
 
 	logger := log.FromContext(requestCtx)
 	for {
@@ -78,7 +79,7 @@ func Worker(consumeCtx, requestCtx context.Context, characteristics pipeline.Cha
 					metrics.RecordAsyncReq(queueID, queueName, msg.WorkerPoolID)
 				}
 
-				payloadBytes := validateAndMarshal(requestCtx, resultChannel, msg)
+				payloadBytes := validateAndMarshal(requestCtx, resultChannel, msg, transforms)
 				if payloadBytes == nil {
 					return
 				}
@@ -113,8 +114,29 @@ func Worker(consumeCtx, requestCtx context.Context, characteristics pipeline.Cha
 					reqCtx, cancel := context.WithDeadline(reqCtx, reqDeadline)
 					defer cancel()
 
+					// Apply the request body-transform chain. If a transform handles
+					// the message we send its body and Content-Type; otherwise the
+					// default JSON payload is sent unchanged. A transform error is
+					// fatal/non-retryable.
+					sendPayload := payloadBytes
+					sendHeaders := msg.HttpHeaders
+					if body, contentType, handled, terr := transforms.Apply(payloadBytes, msg.PublicRequest.ReqMetadata()); terr != nil {
+						span.RecordError(terr)
+						span.SetStatus(codes.Error, "request transform failed")
+						span.SetAttributes(attribute.String(uotel.AttrErrorCategory, string(asyncapi.ErrCategoryInvalidReq)))
+						metrics.RecordFailedReq(queueID, queueName, msg.WorkerPoolID)
+						select {
+						case resultChannel <- CreateErrorResultMessage(msg.PublicRequest, msg.InternalRouting, fmt.Sprintf("Failed to transform request body: %s", terr.Error())):
+						case <-requestCtx.Done():
+						}
+						return
+					} else if handled {
+						sendPayload = body
+						sendHeaders = headersWithContentType(msg.HttpHeaders, contentType)
+					}
+
 					logger.V(logutil.DEBUG).Info("Sending inference request", "url", msg.RequestURL)
-					responseBody, err := client.SendRequest(reqCtx, msg.RequestURL, msg.HttpHeaders, payloadBytes)
+					responseBody, err := client.SendRequest(reqCtx, msg.RequestURL, sendHeaders, sendPayload)
 
 					if err == nil {
 						metrics.RecordSuccessfulReq(queueID, queueName, msg.WorkerPoolID)
@@ -173,7 +195,7 @@ func Worker(consumeCtx, requestCtx context.Context, characteristics pipeline.Cha
 }
 
 // parsing and validating payload. On failure puts an error msg on the result-channel and returns nil
-func validateAndMarshal(ctx context.Context, resultChannel chan asyncapi.ResultMessage, msg pipeline.EmbelishedRequestMessage) []byte {
+func validateAndMarshal(ctx context.Context, resultChannel chan asyncapi.ResultMessage, msg pipeline.EmbelishedRequestMessage, transforms *transform.Chain) []byte {
 	if msg.PublicRequest == nil {
 		return nil
 	}
@@ -208,6 +230,19 @@ func validateAndMarshal(ctx context.Context, resultChannel chan asyncapi.ResultM
 		}
 		return nil
 	}
+
+	// Pre-dispatch transform validation (e.g. signed object URL expiry). A
+	// validation failure is fatal/non-retryable, so we surface an error result
+	// rather than re-enqueue. A nil chain validates successfully.
+	if err := transforms.Validate(payloadBytes, r.ReqMetadata(), deadline); err != nil {
+		metrics.RecordFailedReq(queueID, queueName, msg.WorkerPoolID)
+		select {
+		case resultChannel <- CreateErrorResultMessage(r, msg.InternalRouting, fmt.Sprintf("Failed to validate request for transform: %s", err.Error())):
+		case <-ctx.Done():
+		}
+		return nil
+	}
+
 	return payloadBytes
 }
 
@@ -274,6 +309,18 @@ func CreateErrorResultMessage(req asyncapi.Request, routing asyncapi.InternalRou
 
 func CreateDeadlineExceededResultMessage(req asyncapi.Request, routing asyncapi.InternalRouting) asyncapi.ResultMessage {
 	return CreateErrorResultMessage(req, routing, "deadline exceeded")
+}
+
+// headersWithContentType returns a copy of headers with Content-Type set to
+// contentType. The original map is not mutated, so the per-message headers stay
+// intact across retries.
+func headersWithContentType(headers map[string]string, contentType string) map[string]string {
+	out := make(map[string]string, len(headers)+1)
+	for k, v := range headers {
+		out[k] = v
+	}
+	out["Content-Type"] = contentType
+	return out
 }
 
 func inferenceErrorCategory(err error) string {
