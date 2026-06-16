@@ -11,7 +11,6 @@ import (
 
 	"github.com/llm-d-incubation/llm-d-async/api"
 	"github.com/llm-d-incubation/llm-d-async/pipeline"
-	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 
@@ -133,6 +132,7 @@ func drainBatch[T any](first T, channel <-chan T, maxBatchSize int) []T {
 
 type QueueConfig struct {
 	QueueName          string `json:"queue_name"`
+	WorkerPoolID       string `json:"worker_pool_id"`
 	InferenceObjective string `json:"inference_objective"`
 	RequestPathURL     string `json:"request_path_url"`
 	IGWBaseURL         string `json:"igw_base_url"`
@@ -153,6 +153,7 @@ type RedisMQFlow struct {
 	requestChannels []RequestChannelData
 	retryChannel    chan pipeline.RetryMessage
 	resultChannel   chan api.ResultMessage
+	workerPools     []pipeline.WorkerPoolConfig
 	consumeCancel   context.CancelFunc
 	consumeWg       sync.WaitGroup
 	drainCancel     context.CancelFunc
@@ -160,17 +161,24 @@ type RedisMQFlow struct {
 	enableTracing   bool
 }
 
-// PubSubOption is a functional option for configuring RedisMQFlow.
-type PubSubOption func(*RedisMQFlow)
+// RedisOption is a functional option for configuring RedisMQFlow.
+type RedisOption func(*RedisMQFlow)
 
 // WithRedisTracing enables per-command Redis tracing spans via redisotel.
-func WithRedisTracing(enable bool) PubSubOption {
+func WithRedisTracing(enable bool) RedisOption {
 	return func(r *RedisMQFlow) {
 		r.enableTracing = enable
 	}
 }
 
-func NewRedisMQFlow(opts ...PubSubOption) (*RedisMQFlow, error) {
+// WithWorkerPools sets the pool configurations to resolve named pools.
+func WithWorkerPools(workerPools []pipeline.WorkerPoolConfig) RedisOption {
+	return func(r *RedisMQFlow) {
+		r.workerPools = workerPools
+	}
+}
+
+func NewRedisMQFlow(opts ...RedisOption) (*RedisMQFlow, error) {
 	redisOpts, err := RedisOptions()
 	if err != nil {
 		return nil, fmt.Errorf("invalid Redis connection config: %w", err)
@@ -190,7 +198,24 @@ func NewRedisMQFlow(opts ...PubSubOption) (*RedisMQFlow, error) {
 			return nil, fmt.Errorf("failed to unmarshal queues config: %w", err)
 		}
 	} else {
-		configs = []QueueConfig{{QueueName: *requestQueueName, IGWBaseURL: *igwBaseURL, InferenceObjective: *inferenceObjective, RequestPathURL: *requestPathURL}}
+		configs = []QueueConfig{{
+			QueueName:          *requestQueueName,
+			WorkerPoolID:       "default",
+			InferenceObjective: *inferenceObjective,
+			IGWBaseURL:         *igwBaseURL,
+			RequestPathURL:     *requestPathURL,
+		}}
+	}
+
+	flow := &RedisMQFlow{
+		rdb:           rdb,
+		retryChannel:  make(chan pipeline.RetryMessage),
+		resultChannel: make(chan api.ResultMessage, resultChannelBuffer),
+	}
+
+	// Apply functional options
+	for _, opt := range opts {
+		opt(flow)
 	}
 
 	var channels []RequestChannelData
@@ -198,21 +223,38 @@ func NewRedisMQFlow(opts ...PubSubOption) (*RedisMQFlow, error) {
 	for _, cfg := range configs {
 		ch := make(chan *api.InternalRequest)
 
+		workerPoolID := cfg.WorkerPoolID
+		if workerPoolID == "" {
+			workerPoolID = "default"
+		}
+
+		found := false
+		for _, pool := range flow.workerPools {
+			if pool.ID == workerPoolID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("worker pool %q specified in queue config not found in pool configuration", workerPoolID)
+		}
+
+		if cfg.IGWBaseURL == "" {
+			return nil, fmt.Errorf("queue config for queue %q: igw_base_url must be specified", cfg.QueueName)
+		}
+
+		reqPath := cfg.RequestPathURL
+		if reqPath == "" {
+			reqPath = "/v1/completions"
+		}
+
 		channels = append(channels, RequestChannelData{pipeline.RequestChannel{
 			Channel:            ch,
 			InferenceObjective: cfg.InferenceObjective,
-			RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
-			IGWBaseURL:         util.NormalizeBaseURL(cfg.IGWBaseURL),
+			RequestPathURL:     reqPath,
+			IGWBaseURL:         cfg.IGWBaseURL,
+			WorkerPoolID:       workerPoolID,
 		}, cfg.QueueName})
-	}
-	flow := &RedisMQFlow{
-		rdb:             rdb,
-		requestChannels: channels,
-		retryChannel:    make(chan pipeline.RetryMessage),
-		resultChannel:   make(chan api.ResultMessage, resultChannelBuffer),
-	}
-	for _, opt := range opts {
-		opt(flow)
 	}
 	if flow.enableTracing {
 		if err := redisotel.InstrumentTracing(rdb); err != nil {
@@ -220,6 +262,8 @@ func NewRedisMQFlow(opts ...PubSubOption) (*RedisMQFlow, error) {
 			return nil, fmt.Errorf("failed to instrument Redis tracing: %w", err)
 		}
 	}
+	flow.requestChannels = channels
+
 	return flow, nil
 }
 

@@ -55,6 +55,7 @@ func main() {
 	var tlsCert string
 	var tlsKey string
 	var tlsInsecureSkipVerify bool
+	var poolConfigFile string
 
 	flag.IntVar(&loggerVerbosity, "v", logging.DEFAULT, "number for the log level verbosity")
 
@@ -76,6 +77,7 @@ func main() {
 	flag.StringVar(&tlsCert, "tls-cert", "", "Path to client certificate file (PEM) for mTLS")
 	flag.StringVar(&tlsKey, "tls-key", "", "Path to client key file (PEM) for mTLS")
 	flag.BoolVar(&tlsInsecureSkipVerify, "tls-insecure-skip-verify", false, "Skip TLS certificate verification (dev/test only)")
+	flag.StringVar(&poolConfigFile, "pool-config-file", "", "Path to the pools configuration JSON file")
 
 	var prometheusURL = flag.String("prometheus-url", "", "Prometheus server URL for metric-based gates (e.g., http://localhost:9090)")
 
@@ -110,6 +112,33 @@ func main() {
 	setupLog.Info("Async Processor starting", "version", version.Version, "commit", version.Commit, "buildDate", version.BuildDate)
 
 	printAllFlags(setupLog)
+
+	hasQueueConfig := isQueueConfigSet()
+	hasPoolConfig := (poolConfigFile != "")
+
+	if hasPoolConfig && !hasQueueConfig {
+		setupLog.Error(fmt.Errorf("pool-config-file can only be specified when queues/topics config file is also specified"), "Configuration error")
+		os.Exit(1)
+	}
+
+	var workerPools []pipeline.WorkerPoolConfig
+	if hasPoolConfig {
+		var err error
+		workerPools, err = pipeline.LoadWorkerPools(poolConfigFile)
+		if err != nil {
+			setupLog.Error(err, "Failed to load pool configuration file")
+			os.Exit(1)
+		}
+		setupLog.Info("Loaded named pools config", "count", len(workerPools))
+	} else {
+		// Both are unset. Create a "default" pool.
+		workerPools = []pipeline.WorkerPoolConfig{{
+			ID:      "default",
+			Workers: concurrency,
+		}}
+		setupLog.Info("No queue/pool configs set. Created default pool", "workers", concurrency)
+	}
+
 	// Create Gate Factory for per-queue gate instantiation
 	gateFactory := flowcontrol.NewGateFactoryWithCacheTTL(*prometheusURL, *prometheusCacheTTL)
 	defer func() {
@@ -130,14 +159,14 @@ func main() {
 	var impl pipeline.Flow
 	switch messageQueueImpl {
 	case "redis-pubsub":
-		flow, err := redis.NewRedisMQFlow(redis.WithRedisTracing(redisTracing))
+		flow, err := redis.NewRedisMQFlow(redis.WithRedisTracing(redisTracing), redis.WithWorkerPools(workerPools))
 		if err != nil {
 			setupLog.Error(err, "Failed to create Redis pub/sub flow")
 			os.Exit(1)
 		}
 		impl = flow
 	case "redis-sortedset":
-		flow, err := redis.NewRedisSortedSetFlow(redis.WithGateFactory(gateFactory), redis.WithSortedSetRedisTracing(redisTracing))
+		flow, err := redis.NewRedisSortedSetFlow(redis.WithGateFactory(gateFactory), redis.WithSortedSetRedisTracing(redisTracing), redis.WithSortedSetWorkerPools(workerPools))
 		if err != nil {
 			setupLog.Error(err, "Failed to create Redis sorted-set flow")
 			os.Exit(1)
@@ -145,9 +174,9 @@ func main() {
 		impl = flow
 		setupLog.Info("Using Redis sorted-set flow with per-queue gating")
 	case "gcp-pubsub":
-		impl = pubsub.NewGCPPubSubMQFlow()
+		impl = pubsub.NewGCPPubSubMQFlow(pubsub.WithWorkerPools(workerPools))
 	case "gcp-pubsub-gated":
-		impl = pubsub.NewGCPPubSubMQFlow(pubsub.WithGateFactory(gateFactory))
+		impl = pubsub.NewGCPPubSubMQFlow(pubsub.WithGateFactory(gateFactory), pubsub.WithWorkerPools(workerPools))
 		setupLog.Info("Using GCP PubSub flow with per-queue gating")
 	default:
 		setupLog.Error(fmt.Errorf("unknown message queue implementation: %s", messageQueueImpl), "Unknown message queue implementation",
@@ -208,10 +237,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	totalConcurrency := 0
+	poolsMap := make(map[string]pipeline.WorkerPoolConfig)
+	for _, p := range workerPools {
+		if p.Workers <= 0 {
+			p.Workers = concurrency
+		}
+		poolsMap[p.ID] = p
+		totalConcurrency += p.Workers
+	}
+
 	// Create inference client with a connection pool sized for the worker count.
 	inferenceTransport := &http.Transport{
 		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: concurrency,
+		MaxIdleConnsPerHost: totalConcurrency,
 		IdleConnTimeout:     90 * time.Second,
 		TLSClientConfig:     tlsConfig,
 	}
@@ -222,14 +261,25 @@ func main() {
 	)}
 	inferenceClient := asyncworker.NewHTTPInferenceClient(inferenceHTTPClient)
 
-	requestChannel := policy.MergeRequestChannels(impl.RequestChannels()).Channel
+	dispatch := policy.MergeRequestChannels(impl.RequestChannels(), poolsMap)
+
 	var wg sync.WaitGroup
-	for w := 1; w <= concurrency; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			asyncworker.Worker(signalCtx, drainCtx, impl.Characteristics(), inferenceClient, requestChannel, impl.RetryChannel(), impl.ResultChannel(), requestTimeout)
-		}()
+	for poolID, mergedChan := range dispatch.Channels {
+		pool, ok := poolsMap[poolID]
+		if !ok {
+			setupLog.Error(fmt.Errorf("pool %s not found", poolID), "Pool not found")
+			os.Exit(1)
+		}
+		workersCount := pool.Workers
+
+		setupLog.Info("Spawning workers for pool", "poolID", poolID, "workers", workersCount)
+		for w := 1; w <= workersCount; w++ {
+			wg.Add(1)
+			go func(mergedChan chan pipeline.EmbelishedRequestMessage) {
+				defer wg.Done()
+				asyncworker.Worker(signalCtx, drainCtx, impl.Characteristics(), inferenceClient, mergedChan, impl.RetryChannel(), impl.ResultChannel(), requestTimeout)
+			}(mergedChan)
+		}
 	}
 
 	impl.Start(signalCtx)
@@ -322,7 +372,7 @@ func pollBacklog(ctx context.Context, reporter pipeline.BacklogReporter, interva
 			logger.V(logging.DEFAULT).Error(err, "Failed to poll broker backlog")
 		}
 		for _, s := range stats {
-			metrics.SetBrokerBacklog(s.QueueID, s.QueueName, float64(s.Depth))
+			metrics.SetBrokerBacklog(s.QueueID, s.QueueName, s.PoolName, float64(s.Depth))
 		}
 	}
 
@@ -343,4 +393,19 @@ func printAllFlags(setupLog logr.Logger) {
 		flags[f.Name] = f.Value
 	})
 	setupLog.Info("Flags processed", "flags", flags)
+}
+
+func isQueueConfigSet() bool {
+	for _, flagName := range []string{
+		"redis.queues-config-file",
+		"redis.queues-config",
+		"redis.ss.queues-config-file",
+		"redis.ss.queues-config",
+		"pubsub.topics-config-file",
+	} {
+		if f := flag.Lookup(flagName); f != nil && f.Value.String() != "" {
+			return true
+		}
+	}
+	return false
 }

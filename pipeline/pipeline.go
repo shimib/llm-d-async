@@ -75,13 +75,14 @@ func ConstOpenGate() DispatchGate {
 }
 
 type RequestMergePolicy interface {
-	MergeRequestChannels(channels []RequestChannel) EmbelishedRequestChannel
+	MergeRequestChannels(channels []RequestChannel, pools map[string]WorkerPoolConfig) PoolDispatch
 }
 
 // QueueBacklogStat reports the broker-side backlog for a single queue.
 type QueueBacklogStat struct {
 	QueueID   string
 	QueueName string
+	PoolName  string
 	Depth     int64
 }
 
@@ -99,6 +100,16 @@ type RequestChannel struct {
 	InferenceObjective string
 	RequestPathURL     string
 	Gate               DispatchGate
+	WorkerPoolID       string
+}
+
+// PoolDispatch is the merge policy's output: one buffered channel per
+// inference pool. Each channel carries fully-embellished messages
+// destined for that pool's worker pool. Backpressure on one pool's
+// channel does not affect other pools' channels — that isolation is
+// the whole reason for the per-pool topology.
+type PoolDispatch struct {
+	Channels map[string]chan EmbelishedRequestMessage
 }
 
 type EmbelishedRequestChannel struct {
@@ -111,8 +122,9 @@ type EmbelishedRequestChannel struct {
 // there is no separate Metadata field here to avoid ambiguity.
 type EmbelishedRequestMessage struct {
 	*api.InternalRequest
-	HttpHeaders map[string]string
-	RequestURL  string
+	HttpHeaders  map[string]string
+	RequestURL   string
+	WorkerPoolID string
 }
 
 // RetryMessage carries an embellished request and backoff for re-queueing.

@@ -46,7 +46,7 @@ func Worker(consumeCtx, requestCtx context.Context, characteristics pipeline.Cha
 					if msg.InternalRequest == nil || msg.PublicRequest == nil {
 						continue
 					}
-					metrics.DecQueueDepth(msg.QueueID, msg.RequestQueueName)
+					metrics.DecQueueDepth(msg.QueueID, msg.RequestQueueName, msg.WorkerPoolID)
 					retryMsg := pipeline.RetryMessage{
 						EmbelishedRequestMessage: msg,
 						BackoffDurationSeconds:   0,
@@ -68,15 +68,16 @@ func Worker(consumeCtx, requestCtx context.Context, characteristics pipeline.Cha
 			}
 			queueID := msg.QueueID
 			queueName := msg.RequestQueueName
-			metrics.DecQueueDepth(queueID, queueName)
+			metrics.DecQueueDepth(queueID, queueName, msg.WorkerPoolID)
 
 			processMessage := func() {
-				metrics.IncInflight(queueID, queueName)
-				defer metrics.DecInflight(queueID, queueName)
+				metrics.IncInflight(queueID, queueName, msg.WorkerPoolID)
+				defer metrics.DecInflight(queueID, queueName, msg.WorkerPoolID)
 
 				if msg.RetryCount == 0 {
-					metrics.RecordAsyncReq(queueID, queueName)
+					metrics.RecordAsyncReq(queueID, queueName, msg.WorkerPoolID)
 				}
+
 				payloadBytes := validateAndMarshal(requestCtx, resultChannel, msg)
 				if payloadBytes == nil {
 					return
@@ -116,7 +117,7 @@ func Worker(consumeCtx, requestCtx context.Context, characteristics pipeline.Cha
 					responseBody, err := client.SendRequest(reqCtx, msg.RequestURL, msg.HttpHeaders, payloadBytes)
 
 					if err == nil {
-						metrics.RecordSuccessfulReq(queueID, queueName)
+						metrics.RecordSuccessfulReq(queueID, queueName, msg.WorkerPoolID)
 						select {
 						case resultChannel <- asyncapi.ResultMessage{
 							ID:       msg.PublicRequest.ReqID(),
@@ -145,7 +146,7 @@ func Worker(consumeCtx, requestCtx context.Context, characteristics pipeline.Cha
 						span.RecordError(err)
 						span.SetStatus(codes.Error, "inference request failed")
 						span.SetAttributes(attribute.String(uotel.AttrErrorCategory, inferenceErrorCategory(err)))
-						metrics.RecordFailedReq(queueID, queueName)
+						metrics.RecordFailedReq(queueID, queueName, msg.WorkerPoolID)
 						select {
 						case resultChannel <- CreateErrorResultMessage(msg.PublicRequest, msg.InternalRouting, fmt.Sprintf("Failed to send request to inference: %s", err.Error())):
 						case <-requestCtx.Done():
@@ -154,7 +155,7 @@ func Worker(consumeCtx, requestCtx context.Context, characteristics pipeline.Cha
 					}
 
 					if inferenceErr.Category().Sheddable() {
-						metrics.RecordSheddedReq(queueID, queueName)
+						metrics.RecordSheddedReq(queueID, queueName, msg.WorkerPoolID)
 					}
 					span.SetAttributes(attribute.String(uotel.AttrErrorCategory, string(inferenceErr.Category())))
 					var retryAfter time.Duration
@@ -181,7 +182,7 @@ func validateAndMarshal(ctx context.Context, resultChannel chan asyncapi.ResultM
 	r := msg.PublicRequest
 	deadline := r.ReqDeadline()
 	if deadline <= 0 {
-		metrics.RecordFailedReq(queueID, queueName)
+		metrics.RecordFailedReq(queueID, queueName, msg.WorkerPoolID)
 		select {
 		case resultChannel <- CreateErrorResultMessage(r, msg.InternalRouting, "Failed: deadline is missing or invalid (Unix seconds)."):
 		case <-ctx.Done():
@@ -190,7 +191,7 @@ func validateAndMarshal(ctx context.Context, resultChannel chan asyncapi.ResultM
 	}
 
 	if deadline < time.Now().Unix() {
-		metrics.RecordExceededDeadlineReq(queueID, queueName)
+		metrics.RecordExceededDeadlineReq(queueID, queueName, msg.WorkerPoolID)
 		select {
 		case resultChannel <- CreateDeadlineExceededResultMessage(r, msg.InternalRouting):
 		case <-ctx.Done():
@@ -200,7 +201,7 @@ func validateAndMarshal(ctx context.Context, resultChannel chan asyncapi.ResultM
 
 	payloadBytes, err := json.Marshal(r.ReqPayload())
 	if err != nil {
-		metrics.RecordFailedReq(queueID, queueName)
+		metrics.RecordFailedReq(queueID, queueName, msg.WorkerPoolID)
 		select {
 		case resultChannel <- CreateErrorResultMessage(r, msg.InternalRouting, fmt.Sprintf("Failed to marshal message's payload: %s", err.Error())):
 		case <-ctx.Done():
@@ -220,7 +221,7 @@ func retryMessage(ctx context.Context, msg pipeline.EmbelishedRequestMessage, re
 	deadline := msg.PublicRequest.ReqDeadline()
 	secondsToDeadline := deadline - time.Now().Unix()
 	if secondsToDeadline <= 0 {
-		metrics.RecordExceededDeadlineReq(queueID, queueName)
+		metrics.RecordExceededDeadlineReq(queueID, queueName, msg.WorkerPoolID)
 		select {
 		case resultChannel <- CreateDeadlineExceededResultMessage(msg.PublicRequest, msg.InternalRouting):
 		case <-ctx.Done():
@@ -236,7 +237,7 @@ func retryMessage(ctx context.Context, msg pipeline.EmbelishedRequestMessage, re
 	}
 
 	if finalDuration >= float64(secondsToDeadline) {
-		metrics.RecordExceededDeadlineReq(queueID, queueName)
+		metrics.RecordExceededDeadlineReq(queueID, queueName, msg.WorkerPoolID)
 		select {
 		case resultChannel <- CreateDeadlineExceededResultMessage(msg.PublicRequest, msg.InternalRouting):
 		case <-ctx.Done():
@@ -245,7 +246,7 @@ func retryMessage(ctx context.Context, msg pipeline.EmbelishedRequestMessage, re
 	}
 
 	msg.RetryCount++
-	metrics.RecordRetry(queueID, queueName)
+	metrics.RecordRetry(queueID, queueName, msg.WorkerPoolID)
 	select {
 	case retryChannel <- pipeline.RetryMessage{
 		EmbelishedRequestMessage: msg,

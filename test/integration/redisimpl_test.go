@@ -27,7 +27,13 @@ func TestRedisImpl(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	flow, err := redis.NewRedisMQFlow()
+	_ = flag.Set("redis.igw-base-url", "http://localhost:30800")
+	flow, err := redis.NewRedisMQFlow(redis.WithWorkerPools([]pipeline.WorkerPoolConfig{
+		{
+			ID:      "default",
+			Workers: 1,
+		},
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,8 +50,7 @@ func TestRedisImpl(t *testing.T) {
 					Payload:  map[string]any{"model": "food-review", "prompt": "hi", "max_tokens": 10, "temperature": 0},
 				},
 			),
-			RequestURL:  "http://localhost:30800/v1/completions",
-			HttpHeaders: map[string]string{},
+			RequestURL: "http://localhost:30800/v1/completions",
 		},
 		BackoffDurationSeconds: 2,
 	}
@@ -64,10 +69,17 @@ func TestRedisImpl(t *testing.T) {
 	}
 	time.Sleep(3 * time.Second)
 
-	mergedChannel := ap.NewRandomRobinPolicy().MergeRequestChannels(flow.RequestChannels())
+	pools := map[string]pipeline.WorkerPoolConfig{
+		"default": {
+			ID:      "default",
+			Workers: 1,
+		},
+	}
+	dispatch := ap.NewRandomRobinPolicy().MergeRequestChannels(flow.RequestChannels(), pools)
+	mergedChannel := dispatch.Channels["default"]
 
 	select {
-	case req := <-mergedChannel.Channel:
+	case req := <-mergedChannel:
 		if req.PublicRequest == nil || req.PublicRequest.ReqID() != "test-id" {
 			t.Errorf("Expected message id to be test-id, got %v", req.PublicRequest)
 		}
@@ -85,7 +97,13 @@ func TestRedisImplWithAuth(t *testing.T) {
 	ctx := context.Background()
 	_ = flag.Set("redis.url", redisURL)
 
-	flow, err := redis.NewRedisSortedSetFlow()
+	_ = flag.Set("redis.ss.igw-base-url", "http://localhost:30800")
+	flow, err := redis.NewRedisSortedSetFlow(redis.WithSortedSetWorkerPools([]pipeline.WorkerPoolConfig{
+		{
+			ID:      "default",
+			Workers: 1,
+		},
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

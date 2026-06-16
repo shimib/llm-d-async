@@ -17,7 +17,6 @@ import (
 	"github.com/llm-d-incubation/llm-d-async/api"
 	"github.com/llm-d-incubation/llm-d-async/pipeline"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
-	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -43,6 +42,7 @@ const quotaExceededNackDelay = 10 * time.Second
 
 type TopicConfig struct {
 	SubscriberID       string            `json:"subscriber_id"`
+	WorkerPoolID       string            `json:"worker_pool_id"`
 	InferenceObjective string            `json:"inference_objective"`
 	RequestPathURL     string            `json:"request_path_url"`
 	IGWBaseURL         string            `json:"igw_base_url"`
@@ -59,6 +59,7 @@ type PubSubMQFlow struct {
 	resultChannel   chan api.ResultMessage
 	gate            pipeline.DispatchGate
 	gateFactory     pipeline.GateFactory
+	workerPools     []pipeline.WorkerPoolConfig
 	consumeCancel   context.CancelFunc
 	consumeWg       sync.WaitGroup
 	drainCancel     context.CancelFunc
@@ -83,6 +84,13 @@ func WithGateFactory(factory pipeline.GateFactory) PubSubOption {
 	}
 }
 
+// WithWorkerPools sets the pool configurations to resolve named pools.
+func WithWorkerPools(workerPools []pipeline.WorkerPoolConfig) PubSubOption {
+	return func(p *PubSubMQFlow) {
+		p.workerPools = workerPools
+	}
+}
+
 func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 
 	ctx := context.Background()
@@ -103,7 +111,13 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 			panic(fmt.Sprintf("failed to unmarshal topics config: %v", err))
 		}
 	} else {
-		configs = []TopicConfig{{SubscriberID: *requestSubscriberID, IGWBaseURL: *igwBaseURL, InferenceObjective: *inferenceObjective, RequestPathURL: *requestPathURL}}
+		configs = []TopicConfig{{
+			SubscriberID:       *requestSubscriberID,
+			WorkerPoolID:       "default",
+			InferenceObjective: *inferenceObjective,
+			IGWBaseURL:         *igwBaseURL,
+			RequestPathURL:     *requestPathURL,
+		}}
 	}
 	p := &PubSubMQFlow{
 		resultTopicID:   *resultTopicID,
@@ -129,6 +143,31 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 
 	// Create per-topic channels with gates
 	for _, cfg := range configs {
+		workerPoolID := cfg.WorkerPoolID
+		if workerPoolID == "" {
+			workerPoolID = "default"
+		}
+
+		found := false
+		for _, pool := range p.workerPools {
+			if pool.ID == workerPoolID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			panic(fmt.Sprintf("worker pool %q specified in topic config not found in pool configuration", workerPoolID))
+		}
+
+		if cfg.IGWBaseURL == "" {
+			panic(fmt.Sprintf("topic config for subscriber %q: igw_base_url must be specified", cfg.SubscriberID))
+		}
+
+		reqPath := cfg.RequestPathURL
+		if reqPath == "" {
+			reqPath = "/v1/completions"
+		}
+
 		// Determine gate for this topic
 		var gate pipeline.DispatchGate
 		if p.gateFactory != nil && cfg.GateType != "" {
@@ -150,10 +189,11 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 		p.requestChannels = append(p.requestChannels, RequestChannelData{
 			requestChannel: pipeline.RequestChannel{
 				Channel:            ch,
-				IGWBaseURL:         util.NormalizeBaseURL(cfg.IGWBaseURL),
+				IGWBaseURL:         cfg.IGWBaseURL,
 				InferenceObjective: cfg.InferenceObjective,
-				RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
+				RequestPathURL:     reqPath,
 				Gate:               gate,
+				WorkerPoolID:       workerPoolID,
 			},
 			subscriberID: cfg.SubscriberID,
 			gate:         gate,
@@ -204,7 +244,7 @@ func (r *PubSubMQFlow) Start(ctx context.Context) {
 		r.consumeWg.Add(1)
 		go func(cd RequestChannelData) {
 			defer r.consumeWg.Done()
-			r.requestWorker(consumeCtx, pubSubClient, cd.subscriberID, cd.requestChannel.Channel, cd.gate)
+			r.requestWorker(consumeCtx, pubSubClient, cd.subscriberID, cd.requestChannel.WorkerPoolID, cd.requestChannel.Channel, cd.gate)
 		}(channelData)
 	}
 	publisher := pubSubClient.Publisher(r.resultTopicID)
@@ -265,7 +305,10 @@ func (r *PubSubMQFlow) QueueBacklog(ctx context.Context) ([]pipeline.QueueBacklo
 				// No sample in the window: for a configured subscription this
 				// normally means it has drained. Report 0 so the gauge does not
 				// retain a stale (high) value after the queue empties.
-				stats = append(stats, pipeline.QueueBacklogStat{QueueName: subID})
+				stats = append(stats, pipeline.QueueBacklogStat{
+					QueueName: subID,
+					PoolName:  cd.requestChannel.WorkerPoolID,
+				})
 				continue
 			}
 			if firstErr == nil {
@@ -273,17 +316,24 @@ func (r *PubSubMQFlow) QueueBacklog(ctx context.Context) ([]pipeline.QueueBacklo
 			}
 			// Report 0 rather than skipping so the gauge does not retain a
 			// stale value for this subscription after a failed poll.
-			stats = append(stats, pipeline.QueueBacklogStat{QueueName: subID})
+			stats = append(stats, pipeline.QueueBacklogStat{
+				QueueName: subID,
+				PoolName:  cd.requestChannel.WorkerPoolID,
+			})
 			continue
 		}
 		points := ts.GetPoints()
 		if len(points) == 0 {
-			stats = append(stats, pipeline.QueueBacklogStat{QueueName: subID})
+			stats = append(stats, pipeline.QueueBacklogStat{
+				QueueName: subID,
+				PoolName:  cd.requestChannel.WorkerPoolID,
+			})
 			continue
 		}
 		// Points are returned newest-first; the first is the latest sample.
 		stats = append(stats, pipeline.QueueBacklogStat{
 			QueueName: subID,
+			PoolName:  cd.requestChannel.WorkerPoolID,
 			Depth:     points[0].GetValue().GetInt64Value(),
 		})
 	}
@@ -366,7 +416,7 @@ func addMsgToRetryQueue(ctx context.Context, retryChannel chan pipeline.RetryMes
 	}
 }
 
-func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.Client, subscriberID string, ch chan *api.InternalRequest, gate pipeline.DispatchGate) {
+func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.Client, subscriberID, poolID string, ch chan *api.InternalRequest, gate pipeline.DispatchGate) {
 	logger := log.FromContext(ctx)
 
 	sub := pubSubClient.Subscriber(subscriberID)
@@ -401,7 +451,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 			continue
 		}
 
-		err := r.processMessages(receiveCtx, sub.Receive, subscriberID, ch, gate)
+		err := r.processMessages(receiveCtx, sub.Receive, subscriberID, poolID, ch, gate)
 
 		cancel()
 		// TODO
@@ -414,7 +464,7 @@ func (r *PubSubMQFlow) requestWorker(ctx context.Context, pubSubClient *pubsub.C
 
 type receiveFunc func(context.Context, func(context.Context, *pubsub.Message)) error
 
-func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc, subscriberID string, ch chan *api.InternalRequest, gate pipeline.DispatchGate) error {
+func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc, subscriberID string, poolID string, ch chan *api.InternalRequest, gate pipeline.DispatchGate) error {
 	logger := log.FromContext(ctx)
 	return receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
 
@@ -473,7 +523,7 @@ func (r *PubSubMQFlow) processMessages(ctx context.Context, receive receiveFunc,
 		if !result {
 			msg.Nack()
 		} else {
-			metrics.RecordMessageLatency(float64(time.Since(msg.PublishTime).Milliseconds()), ir.QueueID, ir.RequestQueueName)
+			metrics.RecordMessageLatency(float64(time.Since(msg.PublishTime).Milliseconds()), ir.QueueID, ir.RequestQueueName, poolID)
 			msg.Ack()
 		}
 	})

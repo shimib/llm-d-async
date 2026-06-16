@@ -14,7 +14,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/llm-d-incubation/llm-d-async/api"
 	"github.com/llm-d-incubation/llm-d-async/pipeline"
-	"github.com/llm-d-incubation/llm-d-async/pkg/util"
 
 	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
@@ -80,6 +79,7 @@ type queueConfig struct {
 	ID                 string    `json:"id,omitempty"`
 	QueueName          string    `json:"queue_name,omitempty"`
 	ResultQueueName    string    `json:"result_queue_name,omitempty"`
+	WorkerPoolID       string    `json:"worker_pool_id"`
 	InferenceObjective string    `json:"inference_objective"`
 	RequestPathURL     string    `json:"request_path_url"`
 	IGWBaseURL         string    `json:"igw_base_url"`
@@ -110,6 +110,7 @@ type RedisSortedSetFlow struct {
 	gate            pipeline.DispatchGate
 	gateFactory     pipeline.GateFactory
 	configMap       map[string]queueConfig
+	workerPools     []pipeline.WorkerPoolConfig
 	consumeCancel   context.CancelFunc
 	consumeWg       sync.WaitGroup
 	drainCancel     context.CancelFunc
@@ -132,6 +133,13 @@ func WithGateFactory(factory pipeline.GateFactory) SortedSetOption {
 func WithSortedSetRedisTracing(enable bool) SortedSetOption {
 	return func(r *RedisSortedSetFlow) {
 		r.enableTracing = enable
+	}
+}
+
+// WithSortedSetWorkerPools sets the pool configurations to resolve named pools.
+func WithSortedSetWorkerPools(workerPools []pipeline.WorkerPoolConfig) SortedSetOption {
+	return func(r *RedisSortedSetFlow) {
+		r.workerPools = workerPools
 	}
 }
 
@@ -178,12 +186,38 @@ func NewRedisSortedSetFlow(opts ...SortedSetOption) (*RedisSortedSetFlow, error)
 			gate = pipeline.ConstOpenGate()
 		}
 
+		workerPoolID := cfg.WorkerPoolID
+		if workerPoolID == "" {
+			workerPoolID = "default"
+		}
+
+		found := false
+		for _, pool := range r.workerPools {
+			if pool.ID == workerPoolID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("worker pool %q specified in queue config not found in pool configuration", workerPoolID)
+		}
+
+		if cfg.IGWBaseURL == "" {
+			return nil, fmt.Errorf("queue config for queue %q: igw_base_url must be specified", cfg.QueueName)
+		}
+
+		reqPath := cfg.RequestPathURL
+		if reqPath == "" {
+			reqPath = "/v1/completions"
+		}
+
 		ch := pipeline.RequestChannel{
 			Channel:            make(chan *api.InternalRequest),
 			InferenceObjective: cfg.InferenceObjective,
-			RequestPathURL:     util.NormalizeURLPath(cfg.RequestPathURL),
-			IGWBaseURL:         util.NormalizeBaseURL(cfg.IGWBaseURL),
+			RequestPathURL:     reqPath,
+			IGWBaseURL:         cfg.IGWBaseURL,
 			Gate:               gate,
+			WorkerPoolID:       workerPoolID,
 		}
 
 		r.configMap[cfg.ID] = cfg
@@ -231,10 +265,11 @@ func loadQueueConfigs() ([]queueConfig, error) {
 		configs = []queueConfig{{
 			QueueName:          *ssRequestQueueName,
 			InferenceObjective: *ssInferenceObjective,
-			RequestPathURL:     *ssRequestPathURL,
 			IGWBaseURL:         *ssIGWBaseURL,
+			RequestPathURL:     *ssRequestPathURL,
 			GateType:           *ssGateType,
 			GateParams:         parseGateParams(*ssGateParamsJSON),
+			WorkerPoolID:       "default",
 		}}
 	}
 	seenID := make(map[string]bool, len(configs))
@@ -316,12 +351,14 @@ func (r *RedisSortedSetFlow) QueueBacklog(ctx context.Context) ([]pipeline.Queue
 			stats = append(stats, pipeline.QueueBacklogStat{
 				QueueID:   cd.queueID,
 				QueueName: cd.queueName,
+				PoolName:  cd.channel.WorkerPoolID,
 			})
 			continue
 		}
 		stats = append(stats, pipeline.QueueBacklogStat{
 			QueueID:   cd.queueID,
 			QueueName: cd.queueName,
+			PoolName:  cd.channel.WorkerPoolID,
 			Depth:     depth,
 		})
 	}

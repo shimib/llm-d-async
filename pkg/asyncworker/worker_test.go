@@ -36,6 +36,7 @@ func newEmb(rm asyncapi.RequestMessage, requestURL string, h map[string]string) 
 		InternalRequest: asyncapi.NewInternalRequest(asyncapi.InternalRouting{}, &rm),
 		HttpHeaders:     h,
 		RequestURL:      requestURL,
+		WorkerPoolID:    "test-pool",
 	}
 }
 
@@ -48,6 +49,7 @@ func newEmbR(routing asyncapi.InternalRouting, rm asyncapi.RequestMessage, reque
 		InternalRequest: asyncapi.NewInternalRequest(routing, &rm),
 		HttpHeaders:     h,
 		RequestURL:      requestURL,
+		WorkerPoolID:    "test-pool",
 	}
 }
 
@@ -808,7 +810,7 @@ func TestWorker_DrainsBufferedMessagesOnShutdown(t *testing.T) {
 }
 
 func counterValue(cv *prometheus.CounterVec, queueID, queueName string) float64 {
-	c, err := cv.GetMetricWithLabelValues(queueID, queueName)
+	c, err := cv.GetMetricWithLabelValues(queueID, queueName, "test-pool")
 	if err != nil {
 		return 0
 	}
@@ -816,7 +818,7 @@ func counterValue(cv *prometheus.CounterVec, queueID, queueName string) float64 
 }
 
 func gaugeValue(gv *prometheus.GaugeVec, queueID, queueName string) float64 {
-	g, err := gv.GetMetricWithLabelValues(queueID, queueName)
+	g, err := gv.GetMetricWithLabelValues(queueID, queueName, "test-pool")
 	if err != nil {
 		return 0
 	}
@@ -878,7 +880,7 @@ func TestMetrics_QueueDepthAndInflightBalance(t *testing.T) {
 			go Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false}, inferenceClient, requestChannel, retryChannel, resultChannel, defaultRequestTimeout)
 
 			// Simulate the merge policy's increment for one buffered request.
-			metrics.IncQueueDepth(queueID, queueName)
+			metrics.IncQueueDepth(queueID, queueName, "test-pool")
 			if got := gaugeValue(metrics.QueueDepth, queueID, queueName); got != 1 {
 				t.Fatalf("queue depth before processing = %f, want 1", got)
 			}
@@ -937,7 +939,7 @@ func TestMetrics_QueueDepthDecrementsOnDrain(t *testing.T) {
 	// Buffer n messages and account for them as the merge policy would, then
 	// cancel both contexts so the worker drains/re-enqueues every message.
 	for i := 0; i < n; i++ {
-		metrics.IncQueueDepth(queueID, queueName)
+		metrics.IncQueueDepth(queueID, queueName, "test-pool")
 		requestChannel <- newEmbR(asyncapi.InternalRouting{
 			QueueID:          queueID,
 			RequestQueueName: queueName,

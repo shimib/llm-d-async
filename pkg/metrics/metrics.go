@@ -14,9 +14,10 @@ const (
 
 	LabelQueueID   = "queue_id"
 	LabelQueueName = "queue_name"
+	LabelPoolName  = "pool_name"
 )
 
-var queueLabels = []string{LabelQueueID, LabelQueueName}
+var queueLabels = []string{LabelQueueID, LabelQueueName, LabelPoolName}
 
 var (
 	Retries = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -62,57 +63,57 @@ var (
 	}, queueLabels)
 )
 
-func RecordRetry(queueID, queueName string) {
-	Retries.WithLabelValues(queueID, queueName).Inc()
+func RecordRetry(queueID, queueName, poolName string) {
+	Retries.WithLabelValues(queueID, queueName, poolName).Inc()
 }
 
-func RecordAsyncReq(queueID, queueName string) {
-	AsyncReqs.WithLabelValues(queueID, queueName).Inc()
+func RecordAsyncReq(queueID, queueName, poolName string) {
+	AsyncReqs.WithLabelValues(queueID, queueName, poolName).Inc()
 }
 
-func RecordExceededDeadlineReq(queueID, queueName string) {
-	ExceededDeadlineReqs.WithLabelValues(queueID, queueName).Inc()
+func RecordExceededDeadlineReq(queueID, queueName, poolName string) {
+	ExceededDeadlineReqs.WithLabelValues(queueID, queueName, poolName).Inc()
 }
 
-func RecordFailedReq(queueID, queueName string) {
-	FailedReqs.WithLabelValues(queueID, queueName).Inc()
+func RecordFailedReq(queueID, queueName, poolName string) {
+	FailedReqs.WithLabelValues(queueID, queueName, poolName).Inc()
 }
 
-func RecordSuccessfulReq(queueID, queueName string) {
-	SuccessfulReqs.WithLabelValues(queueID, queueName).Inc()
+func RecordSuccessfulReq(queueID, queueName, poolName string) {
+	SuccessfulReqs.WithLabelValues(queueID, queueName, poolName).Inc()
 }
 
-func RecordSheddedReq(queueID, queueName string) {
-	SheddedRequests.WithLabelValues(queueID, queueName).Inc()
+func RecordSheddedReq(queueID, queueName, poolName string) {
+	SheddedRequests.WithLabelValues(queueID, queueName, poolName).Inc()
 }
 
-func RecordMessageLatency(millis float64, queueID, queueName string) {
-	MessageLatencyTime.WithLabelValues(queueID, queueName).Observe(millis)
+func RecordMessageLatency(millis float64, queueID, queueName, poolName string) {
+	MessageLatencyTime.WithLabelValues(queueID, queueName, poolName).Observe(millis)
 }
 
 // IncQueueDepth increments the count of in-process buffered requests.
-func IncQueueDepth(queueID, queueName string) {
-	QueueDepth.WithLabelValues(queueID, queueName).Inc()
+func IncQueueDepth(queueID, queueName, poolName string) {
+	QueueDepth.WithLabelValues(queueID, queueName, poolName).Inc()
 }
 
 // DecQueueDepth decrements the count of in-process buffered requests.
-func DecQueueDepth(queueID, queueName string) {
-	QueueDepth.WithLabelValues(queueID, queueName).Dec()
+func DecQueueDepth(queueID, queueName, poolName string) {
+	QueueDepth.WithLabelValues(queueID, queueName, poolName).Dec()
 }
 
 // IncInflight increments the count of requests actively processed by workers.
-func IncInflight(queueID, queueName string) {
-	InflightRequests.WithLabelValues(queueID, queueName).Inc()
+func IncInflight(queueID, queueName, poolName string) {
+	InflightRequests.WithLabelValues(queueID, queueName, poolName).Inc()
 }
 
 // DecInflight decrements the count of requests actively processed by workers.
-func DecInflight(queueID, queueName string) {
-	InflightRequests.WithLabelValues(queueID, queueName).Dec()
+func DecInflight(queueID, queueName, poolName string) {
+	InflightRequests.WithLabelValues(queueID, queueName, poolName).Dec()
 }
 
 // SetBrokerBacklog sets the broker-side backlog for a queue.
-func SetBrokerBacklog(queueID, queueName string, n float64) {
-	BrokerBacklog.WithLabelValues(queueID, queueName).Set(n)
+func SetBrokerBacklog(queueID, queueName, poolName string, n float64) {
+	BrokerBacklog.WithLabelValues(queueID, queueName, poolName).Set(n)
 }
 
 // GetCollectors returns all custom collectors for the async processor.

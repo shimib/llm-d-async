@@ -25,14 +25,23 @@ func TestRandomRobinPolicy_ConcurrentProducers(t *testing.T) {
 	for i := range numChannels {
 		channels[i] = pipeline.RequestChannel{
 			Channel:            make(chan *asyncapi.InternalRequest, msgsPerChannel),
-			IGWBaseURL:         "http://localhost:8080",
 			InferenceObjective: "latency",
+			WorkerPoolID:       "test-pool",
+			IGWBaseURL:         "http://localhost:8080",
 			RequestPathURL:     "/v1/completions",
 		}
 	}
 
+	pools := map[string]pipeline.WorkerPoolConfig{
+		"test-pool": {
+			ID:      "test-pool",
+			Workers: 1,
+		},
+	}
+
 	policy := ap.NewRandomRobinPolicy()
-	merged := policy.MergeRequestChannels(channels)
+	dispatch := policy.MergeRequestChannels(channels, pools)
+	mergedChan := dispatch.Channels["test-pool"]
 
 	// Produce messages concurrently on all channels.
 	var wg sync.WaitGroup
@@ -60,7 +69,7 @@ func TestRandomRobinPolicy_ConcurrentProducers(t *testing.T) {
 	received := make(map[string]bool)
 	done := make(chan struct{})
 	go func() {
-		for msg := range merged.Channel {
+		for msg := range mergedChan {
 			received[msg.InternalRequest.PublicRequest.ReqID()] = true
 		}
 		close(done)
