@@ -43,7 +43,7 @@ helm package charts/async-processor -d release/
 
 (cd release && sha256sum "async-processor-${CHART_VERSION}.tgz" >> SHA256SUMS && cat SHA256SUMS)
 
-echo "${GITHUB_TOKEN}" | helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+printf '%s' "${GITHUB_TOKEN}" | helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
 helm push "release/async-processor-${CHART_VERSION}.tgz" "${HELM_OCI_REGISTRY}"
 
 echo "Helm chart published: ${HELM_OCI_REGISTRY}/async-processor:${CHART_VERSION}"
