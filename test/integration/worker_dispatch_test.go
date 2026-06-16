@@ -52,7 +52,7 @@ func TestWorkerDispatch_DrainsBufferedOnShutdown(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		asyncworker.Worker(consumeCtx, requestCtx, pipeline.Characteristics{HasExternalBackoff: false},
-			client, requestChannel, retryChannel, resultChannel, 5*time.Minute)
+			client, requestChannel, retryChannel, resultChannel, 5*time.Minute, nil)
 	}()
 
 	ids := []string{"drain-int-1", "drain-int-2", "drain-int-3"}
@@ -124,7 +124,7 @@ func TestWorkerDispatch_MockIGW(t *testing.T) {
 	defer cancel()
 
 	go asyncworker.Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false},
-		client, requestChannel, retryChannel, resultChannel, 5*time.Minute)
+		client, requestChannel, retryChannel, resultChannel, 5*time.Minute, nil)
 
 	ir := asyncapi.NewInternalRequest(
 		asyncapi.InternalRouting{RequestQueueName: "test-queue"},
@@ -193,7 +193,7 @@ func TestWorkerDispatch_EndpointOverride(t *testing.T) {
 	defer cancel()
 
 	go asyncworker.Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false},
-		client, requestChannel, retryChannel, resultChannel, 5*time.Minute)
+		client, requestChannel, retryChannel, resultChannel, 5*time.Minute, nil)
 
 	ir := asyncapi.NewInternalRequest(
 		asyncapi.InternalRouting{},
@@ -240,7 +240,7 @@ func TestWorkerDispatch_ServerErrorTriggersRetry(t *testing.T) {
 	defer cancel()
 
 	go asyncworker.Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false},
-		client, requestChannel, retryChannel, resultChannel, 5*time.Minute)
+		client, requestChannel, retryChannel, resultChannel, 5*time.Minute, nil)
 
 	ir := asyncapi.NewInternalRequest(
 		asyncapi.InternalRouting{},
@@ -289,7 +289,7 @@ func TestWorkerDispatch_ResultCallback(t *testing.T) {
 	defer cancel()
 
 	go asyncworker.Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false},
-		client, requestChannel, retryChannel, resultChannel, 5*time.Minute)
+		client, requestChannel, retryChannel, resultChannel, 5*time.Minute, nil)
 
 	routing := asyncapi.InternalRouting{
 		RequestQueueName:       "my-queue",
@@ -349,7 +349,7 @@ func TestWorkerDispatch_RequeuesOnShutdown(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		asyncworker.Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false},
-			client, requestChannel, retryChannel, resultChannel, 5*time.Minute)
+			client, requestChannel, retryChannel, resultChannel, 5*time.Minute, nil)
 	}()
 
 	ir := asyncapi.NewInternalRequest(
@@ -429,11 +429,11 @@ func TestWorkerDispatch_PoolIsolation(t *testing.T) {
 
 	// Spawn 1 worker for pool-blocked
 	go asyncworker.Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false},
-		clientBlocked, reqChanBlocked, retryChanBlocked, resultChanBlocked, 5*time.Minute)
+		clientBlocked, reqChanBlocked, retryChanBlocked, resultChanBlocked, 5*time.Minute, nil)
 
 	// Spawn 1 worker for pool-active
 	go asyncworker.Worker(ctx, ctx, pipeline.Characteristics{HasExternalBackoff: false},
-		clientActive, reqChanActive, retryChanActive, resultChanActive, 5*time.Minute)
+		clientActive, reqChanActive, retryChanActive, resultChanActive, 5*time.Minute, nil)
 
 	// 3. Send message 1 (to pool-blocked)
 	irBlocked := asyncapi.NewInternalRequest(
