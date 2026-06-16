@@ -54,6 +54,11 @@ var (
 		Help:    "Time spent calling the inference gateway (IGW), separating model time from queue time.",
 		Buckets: []float64{10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000},
 	}, queueLabels)
+	QueueResidenceTime = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Subsystem: SchedulerSubsystem, Name: "async_queue_residence_time_millis",
+		Help:    "Time a message spent buffered in-process from broker ingestion until a worker pulled it (the async delay introduced by the system).",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000},
+	}, queueLabels)
 	QueueDepth = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Subsystem: SchedulerSubsystem, Name: "async_queue_depth",
 		Help: "Number of requests received from the broker and buffered in-process awaiting an available worker.",
@@ -101,6 +106,12 @@ func RecordInferenceLatency(millis float64, queueID, queueName, poolName string)
 	InferenceLatencyTime.WithLabelValues(queueID, queueName, poolName).Observe(millis)
 }
 
+// RecordQueueResidenceTime observes the time a message spent buffered in-process
+// from broker ingestion until a worker pulled it.
+func RecordQueueResidenceTime(millis float64, queueID, queueName, poolName string) {
+	QueueResidenceTime.WithLabelValues(queueID, queueName, poolName).Observe(millis)
+}
+
 // IncQueueDepth increments the count of in-process buffered requests.
 func IncQueueDepth(queueID, queueName, poolName string) {
 	QueueDepth.WithLabelValues(queueID, queueName, poolName).Inc()
@@ -130,7 +141,7 @@ func SetBrokerBacklog(queueID, queueName, poolName string, n float64) {
 func GetAsyncProcessorCollectors(supportsMessageLatency bool) []prometheus.Collector {
 	collectors := []prometheus.Collector{
 		Retries, AsyncReqs, ExceededDeadlineReqs, FailedReqs, SuccessfulReqs, SheddedRequests,
-		QueueDepth, InflightRequests, BrokerBacklog, InferenceLatencyTime,
+		QueueDepth, InflightRequests, BrokerBacklog, InferenceLatencyTime, QueueResidenceTime,
 	}
 	if supportsMessageLatency {
 		collectors = append(collectors, MessageLatencyTime)
