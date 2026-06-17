@@ -15,6 +15,8 @@ import (
 	"github.com/llm-d-incubation/llm-d-async/pkg/plugins"
 )
 
+var _ transform.RequestTransform = (*testTransform)(nil)
+
 // testTransform is a minimal RequestTransform for worker integration tests.
 type testTransform struct {
 	validateErr error

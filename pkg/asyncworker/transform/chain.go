@@ -1,5 +1,7 @@
 package transform
 
+import "fmt"
+
 // Chain is an ordered set of RequestTransform plugins applied to each outgoing
 // request. A nil *Chain is valid and behaves as a no-op, so callers that have no
 // transforms configured can pass nil and preserve the default JSON path exactly.
@@ -29,7 +31,7 @@ func (c *Chain) Validate(payload []byte, metadata map[string]string, reqDeadline
 	}
 	for _, t := range c.transforms {
 		if err := t.Validate(payload, metadata, reqDeadline); err != nil {
-			return err
+			return fmt.Errorf("transform %s: %w", t.TypedName(), err)
 		}
 	}
 	return nil
@@ -48,7 +50,7 @@ func (c *Chain) Apply(payload []byte, metadata map[string]string) (body []byte, 
 	for _, t := range c.transforms {
 		body, contentType, handled, err = t.Transform(payload, metadata)
 		if err != nil {
-			return nil, "", false, err
+			return nil, "", false, fmt.Errorf("transform %s: %w", t.TypedName(), err)
 		}
 		if handled {
 			return body, contentType, true, nil

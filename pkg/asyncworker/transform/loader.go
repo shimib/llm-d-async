@@ -35,8 +35,8 @@ func LoadConfig(path string) ([]PluginSpec, error) {
 
 // BuildChain instantiates the configured transforms in order, registering each
 // instance on handle, and returns the resulting Chain. Plugin names must be
-// non-empty and unique; each type must be registered in plugins.Registry and the
-// instantiated plugin must implement RequestTransform.
+// non-empty and unique; each type must be registered with plugins.Register and
+// the instantiated plugin must implement RequestTransform.
 //
 // An empty spec list returns an empty (no-op) Chain.
 func BuildChain(specs []PluginSpec, handle plugins.Handle) (*Chain, error) {
@@ -55,7 +55,7 @@ func BuildChain(specs []PluginSpec, handle plugins.Handle) (*Chain, error) {
 		}
 		seen[spec.Name] = true
 
-		factory, ok := plugins.Registry[spec.Type]
+		factory, ok := plugins.Lookup(spec.Type)
 		if !ok {
 			return nil, fmt.Errorf("transform plugin %q has unregistered type %q", spec.Name, spec.Type)
 		}

@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+var _ Plugin = (*stubPlugin)(nil)
+
 type stubPlugin struct {
 	name string
 }
@@ -23,15 +25,17 @@ func TestRegistry_RegisterAndLookup(t *testing.T) {
 	// Use a unique type so we don't collide with other tests/packages.
 	const typ = "plugins_test.stub"
 	called := false
-	Register(typ, func(name string, _ json.RawMessage, _ Handle) (Plugin, error) {
+	if err := Register(typ, func(name string, _ json.RawMessage, _ Handle) (Plugin, error) {
 		called = true
 		return &stubPlugin{name: name}, nil
-	})
-	t.Cleanup(func() { delete(Registry, typ) })
+	}); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	t.Cleanup(func() { delete(registry, typ) })
 
-	factory, ok := Registry[typ]
+	factory, ok := Lookup(typ)
 	if !ok {
-		t.Fatalf("type %q not found in Registry after Register", typ)
+		t.Fatalf("type %q not found after Register", typ)
 	}
 	p, err := factory("inst", nil, NewHandle(context.Background()))
 	if err != nil {
@@ -42,6 +46,21 @@ func TestRegistry_RegisterAndLookup(t *testing.T) {
 	}
 	if p.TypedName().Name != "inst" {
 		t.Errorf("plugin name = %q, want %q", p.TypedName().Name, "inst")
+	}
+}
+
+func TestRegistry_DuplicateRegistrationFails(t *testing.T) {
+	const typ = "plugins_test.dup"
+	factory := func(name string, _ json.RawMessage, _ Handle) (Plugin, error) {
+		return &stubPlugin{name: name}, nil
+	}
+	if err := Register(typ, factory); err != nil {
+		t.Fatalf("first Register returned error: %v", err)
+	}
+	t.Cleanup(func() { delete(registry, typ) })
+
+	if err := Register(typ, factory); err == nil {
+		t.Error("expected error registering duplicate type, got nil")
 	}
 }
 
@@ -58,28 +77,5 @@ func TestHandle_AddAndGet(t *testing.T) {
 	h.AddPlugin("a", p)
 	if h.Plugin("a") != p {
 		t.Error("Plugin(a) did not return the added plugin")
-	}
-	if len(h.GetAllPlugins()) != 1 {
-		t.Errorf("GetAllPlugins len = %d, want 1", len(h.GetAllPlugins()))
-	}
-	if _, ok := h.GetAllPluginsWithNames()["a"]; !ok {
-		t.Error("GetAllPluginsWithNames missing key 'a'")
-	}
-}
-
-func TestPluginByType(t *testing.T) {
-	h := NewHandle(context.Background())
-	h.AddPlugin("a", &stubPlugin{name: "a"})
-
-	got, err := PluginByType[*stubPlugin](h, "a")
-	if err != nil {
-		t.Fatalf("PluginByType error: %v", err)
-	}
-	if got.name != "a" {
-		t.Errorf("name = %q, want %q", got.name, "a")
-	}
-
-	if _, err := PluginByType[*stubPlugin](h, "missing"); err == nil {
-		t.Error("expected error for missing plugin")
 	}
 }

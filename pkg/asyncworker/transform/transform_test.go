@@ -11,6 +11,8 @@ import (
 	"github.com/llm-d-incubation/llm-d-async/pkg/plugins"
 )
 
+var _ RequestTransform = (*fakeTransform)(nil)
+
 // fakeTransform is a configurable RequestTransform for tests.
 type fakeTransform struct {
 	name        string
@@ -124,10 +126,12 @@ func TestChain_Apply_ErrorShortCircuits(t *testing.T) {
 // and cleans it up after the test.
 func registerFake(t *testing.T, typ string) {
 	t.Helper()
-	plugins.Register(typ, func(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	if err := plugins.Register(typ, func(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
 		return &fakeTransform{name: name, handled: true, body: []byte("x")}, nil
-	})
-	t.Cleanup(func() { delete(plugins.Registry, typ) })
+	}); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	t.Cleanup(func() { plugins.Unregister(typ) })
 }
 
 func TestLoadConfigAndBuildChain(t *testing.T) {
@@ -184,6 +188,8 @@ func TestBuildChain_Errors(t *testing.T) {
 	}
 }
 
+var _ plugins.Plugin = nonTransformPlugin{}
+
 // nonTransformPlugin implements plugins.Plugin but not RequestTransform.
 type nonTransformPlugin struct{}
 
@@ -193,10 +199,12 @@ func (nonTransformPlugin) TypedName() plugins.TypedName {
 
 func TestBuildChain_NotARequestTransform(t *testing.T) {
 	const typ = "transform_test.nontransform"
-	plugins.Register(typ, func(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	if err := plugins.Register(typ, func(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
 		return nonTransformPlugin{}, nil
-	})
-	t.Cleanup(func() { delete(plugins.Registry, typ) })
+	}); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	t.Cleanup(func() { plugins.Unregister(typ) })
 
 	_, err := BuildChain([]PluginSpec{{Name: "n", Type: typ}}, plugins.NewHandle(context.Background()))
 	if err == nil {

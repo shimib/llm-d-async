@@ -1,9 +1,6 @@
 package plugins
 
-import (
-	"context"
-	"fmt"
-)
+import "context"
 
 // Handle provides plugins a set of standard data and tools to work with. It is a
 // trimmed, Kubernetes-free analog of EPP's Handle: it carries a context and the
@@ -22,13 +19,12 @@ type HandlePlugins interface {
 
 	// AddPlugin adds a plugin to the set of known plugin instances.
 	AddPlugin(name string, plugin Plugin)
-
-	// GetAllPlugins returns all of the known plugins.
-	GetAllPlugins() []Plugin
-
-	// GetAllPluginsWithNames returns all of the known plugins keyed by name.
-	GetAllPluginsWithNames() map[string]Plugin
 }
+
+var (
+	_ Handle        = (*handle)(nil)
+	_ HandlePlugins = (*handlePlugins)(nil)
+)
 
 // handle is the default Handle implementation.
 type handle struct {
@@ -56,39 +52,10 @@ func (h *handlePlugins) AddPlugin(name string, plugin Plugin) {
 	h.plugins[name] = plugin
 }
 
-// GetAllPlugins returns all of the known plugins.
-func (h *handlePlugins) GetAllPlugins() []Plugin {
-	result := make([]Plugin, 0, len(h.plugins))
-	for _, plugin := range h.plugins {
-		result = append(result, plugin)
-	}
-	return result
-}
-
-// GetAllPluginsWithNames returns all of the known plugins keyed by name.
-func (h *handlePlugins) GetAllPluginsWithNames() map[string]Plugin {
-	return h.plugins
-}
-
 // NewHandle returns a Handle backed by the given context and an empty plugin set.
 func NewHandle(ctx context.Context) Handle {
 	return &handle{
 		ctx:           ctx,
 		HandlePlugins: &handlePlugins{plugins: map[string]Plugin{}},
 	}
-}
-
-// PluginByType retrieves the named plugin and asserts it implements P.
-func PluginByType[P Plugin](handlePlugins HandlePlugins, name string) (P, error) {
-	var zero P
-
-	rawPlugin := handlePlugins.Plugin(name)
-	if rawPlugin == nil {
-		return zero, fmt.Errorf("there is no plugin with the name '%s' defined", name)
-	}
-	plugin, ok := rawPlugin.(P)
-	if !ok {
-		return zero, fmt.Errorf("the plugin with the name '%s' is not an instance of %T", name, zero)
-	}
-	return plugin, nil
 }
