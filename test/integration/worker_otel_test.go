@@ -68,7 +68,7 @@ func TestWorkerDispatch_TraceparentInjected(t *testing.T) {
 	defer cancel()
 
 	go asyncworker.Worker(ctx, ctx, pipeline.Characteristics{},
-		client, requestChannel, retryChannel, resultChannel, 5*time.Minute)
+		client, requestChannel, retryChannel, resultChannel, 5*time.Minute, nil)
 
 	ir := asyncapi.NewInternalRequest(
 		asyncapi.InternalRouting{},
@@ -126,7 +126,7 @@ func TestWorkerDispatch_SpanHierarchy(t *testing.T) {
 	defer cancel()
 
 	go asyncworker.Worker(ctx, ctx, pipeline.Characteristics{},
-		client, requestChannel, retryChannel, resultChannel, 5*time.Minute)
+		client, requestChannel, retryChannel, resultChannel, 5*time.Minute, nil)
 
 	ir := asyncapi.NewInternalRequest(
 		asyncapi.InternalRouting{},
@@ -210,7 +210,7 @@ func TestWorkerDispatch_MetadataTraceContextPropagation(t *testing.T) {
 	producerSpan.End()
 
 	go asyncworker.Worker(ctx, ctx, pipeline.Characteristics{},
-		client, requestChannel, retryChannel, resultChannel, 5*time.Minute)
+		client, requestChannel, retryChannel, resultChannel, 5*time.Minute, nil)
 
 	ir := asyncapi.NewInternalRequest(
 		asyncapi.InternalRouting{},
