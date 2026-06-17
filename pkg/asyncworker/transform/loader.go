@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,20 +18,33 @@ type PluginSpec struct {
 	Parameters json.RawMessage `json:"parameters,omitempty"`
 }
 
-// LoadConfig reads and parses a transform plugins configuration JSON file (a
-// JSON array of PluginSpec). It does not instantiate plugins; pass the result to
-// BuildChain.
-func LoadConfig(path string) ([]PluginSpec, error) {
+// Config is the top-level transform plugins configuration. Transforms are keyed
+// by direction so request and (in the future) response plugins can share a
+// single config file. Only requestTransforms is consumed today; responseTransforms
+// is reserved for the symmetric response body-transform extension point (#259).
+type Config struct {
+	RequestTransforms []PluginSpec `json:"requestTransforms"`
+}
+
+// LoadConfig reads and parses a transform plugins configuration JSON file. The
+// file is a JSON object with transforms grouped by direction, e.g.
+// {"requestTransforms": [ ... ]}. Unknown top-level fields are rejected so a
+// typo (or a not-yet-supported direction such as responseTransforms) fails
+// loudly instead of being silently ignored. It does not instantiate plugins;
+// pass the result to BuildChain.
+func LoadConfig(path string) (Config, error) {
 	data, err := os.ReadFile(path) // #nosec G304 -- path from trusted CLI flag
 	if err != nil {
-		return nil, fmt.Errorf("failed to read transform config file: %w", err)
+		return Config{}, fmt.Errorf("failed to read transform config file: %w", err)
 	}
 
-	var specs []PluginSpec
-	if err := json.Unmarshal(data, &specs); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal transform config: %w", err)
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var cfg Config
+	if err := dec.Decode(&cfg); err != nil {
+		return Config{}, fmt.Errorf("failed to unmarshal transform config: %w", err)
 	}
-	return specs, nil
+	return cfg, nil
 }
 
 // BuildChain instantiates the configured transforms in order, registering each

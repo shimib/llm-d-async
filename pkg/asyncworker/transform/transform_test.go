@@ -140,15 +140,16 @@ func TestLoadConfigAndBuildChain(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "transforms.json")
-	cfg := `[{"name":"whisper","type":"transform_test.multipart","parameters":{"provider":"whisper"}}]`
+	cfg := `{"requestTransforms":[{"name":"whisper","type":"transform_test.multipart","parameters":{"provider":"whisper"}}]}`
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	specs, err := LoadConfig(path)
+	loaded, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
+	specs := loaded.RequestTransforms
 	if len(specs) != 1 || specs[0].Name != "whisper" || specs[0].Type != typ {
 		t.Fatalf("unexpected specs: %+v", specs)
 	}
@@ -163,6 +164,21 @@ func TestLoadConfigAndBuildChain(t *testing.T) {
 	}
 	if handle.Plugin("whisper") == nil {
 		t.Error("plugin 'whisper' not registered on handle")
+	}
+}
+
+func TestLoadConfig_RejectsUnknownTopLevelFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transforms.json")
+	// responseTransforms is not supported yet (#259); a typo or premature use
+	// must fail loudly rather than be silently dropped.
+	cfg := `{"requestTransforms":[],"responseTransforms":[]}`
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadConfig(path); err == nil {
+		t.Error("LoadConfig with unknown top-level field = nil error, want error")
 	}
 }
 

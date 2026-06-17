@@ -81,7 +81,7 @@ func main() {
 	flag.StringVar(&tlsKey, "tls-key", "", "Path to client key file (PEM) for mTLS")
 	flag.BoolVar(&tlsInsecureSkipVerify, "tls-insecure-skip-verify", false, "Skip TLS certificate verification (dev/test only)")
 	flag.StringVar(&poolConfigFile, "pool-config-file", "", "Path to the pools configuration JSON file")
-	flag.StringVar(&transformConfigFile, "transform-config-file", "", "Path to the request body-transform plugins configuration JSON file (empty disables transforms)")
+	flag.StringVar(&transformConfigFile, "transform-config-file", "", "Path to the body-transform plugins configuration JSON file (object with a requestTransforms array; empty disables transforms)")
 
 	var prometheusURL = flag.String("prometheus-url", "", "Prometheus server URL for metric-based gates (e.g., http://localhost:9090)")
 
@@ -270,12 +270,12 @@ func main() {
 	// JSON dispatch path unchanged.
 	var transforms *transform.Chain
 	if transformConfigFile != "" {
-		specs, err := transform.LoadConfig(transformConfigFile)
+		cfg, err := transform.LoadConfig(transformConfigFile)
 		if err != nil {
 			setupLog.Error(err, "Failed to load transform configuration file")
 			os.Exit(1)
 		}
-		transforms, err = transform.BuildChain(specs, plugins.NewHandle(signalCtx))
+		transforms, err = transform.BuildChain(cfg.RequestTransforms, plugins.NewHandle(signalCtx))
 		if err != nil {
 			setupLog.Error(err, "Failed to build request transform chain")
 			os.Exit(1)
