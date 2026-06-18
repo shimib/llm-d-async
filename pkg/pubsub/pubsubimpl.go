@@ -14,10 +14,13 @@ import (
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"cloud.google.com/go/pubsub/v2"
+	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/llm-d-incubation/llm-d-async/api"
 	"github.com/llm-d-incubation/llm-d-async/pipeline"
 	"github.com/llm-d-incubation/llm-d-async/pkg/metrics"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
@@ -66,6 +69,7 @@ type PubSubMQFlow struct {
 	drainWg         sync.WaitGroup
 	metricClient    *monitoring.MetricClient
 	projectID       string
+	client          *pubsub.Client
 }
 type RequestChannelData struct {
 	requestChannel pipeline.RequestChannel
@@ -125,6 +129,7 @@ func NewGCPPubSubMQFlow(opts ...PubSubOption) *PubSubMQFlow {
 		retryChannel:    make(chan pipeline.RetryMessage),
 		resultChannel:   make(chan api.ResultMessage),
 		projectID:       *projectID,
+		client:          pubSubClient,
 	}
 
 	// Cloud Monitoring client for broker-backlog metrics. Best-effort: if it
@@ -221,6 +226,35 @@ func (r *PubSubMQFlow) Characteristics() pipeline.Characteristics {
 		HasExternalBackoff:     true,
 		SupportsMessageLatency: true,
 	}
+}
+
+var _ pipeline.HealthChecker = (*PubSubMQFlow)(nil)
+
+// HealthCheck verifies broker connectivity by confirming each configured request
+// subscription is reachable. It backs the /readyz probe: an unreachable Pub/Sub
+// backend (e.g. broker down or network partition) surfaces as a gRPC Unavailable
+// error and marks the pod not-ready.
+func (r *PubSubMQFlow) HealthCheck(ctx context.Context) error {
+	for _, cd := range r.requestChannels {
+		// Subscriber() normalizes both short IDs and full resource paths; reuse
+		// its result as the fully-qualified name for the admin lookup.
+		name := r.client.Subscriber(cd.subscriberID).String()
+		_, err := r.client.SubscriptionAdminClient.GetSubscription(ctx,
+			&pubsubpb.GetSubscriptionRequest{Subscription: name})
+		if err == nil {
+			continue
+		}
+		// A PermissionDenied response still proves the broker is reachable: the
+		// consume-only role (roles/pubsub.subscriber) lacks
+		// pubsub.subscriptions.get, so we can confirm connectivity but not
+		// introspect the subscription. Treat it as healthy rather than failing
+		// readiness for a correctly-configured consumer.
+		if status.Code(err) == codes.PermissionDenied {
+			continue
+		}
+		return fmt.Errorf("pubsub subscription %q health check failed: %w", cd.subscriberID, err)
+	}
+	return nil
 }
 
 func (r *PubSubMQFlow) RequestChannels() []pipeline.RequestChannel {

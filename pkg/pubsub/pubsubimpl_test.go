@@ -5,12 +5,18 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/pubsub/v2"
+	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"cloud.google.com/go/pubsub/v2/pstest"
 	"github.com/llm-d-incubation/llm-d-async/api"
 	"github.com/llm-d-incubation/llm-d-async/pipeline"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type mockAttributeGate struct {
@@ -258,4 +264,100 @@ func TestNewGCPPubSubMQFlow_PoolRequiredAndValidation(t *testing.T) {
 		}()
 		NewGCPPubSubMQFlow(WithWorkerPools([]pipeline.WorkerPoolConfig{{ID: "test-pool", Workers: 1}}))
 	}()
+}
+
+const testProject = "test-project"
+
+// newFakePubSub starts an in-memory Pub/Sub fake and returns a client wired to
+// it along with a closer to take the broker down. The closer is idempotent and
+// also runs on test cleanup.
+func newFakePubSub(t *testing.T) (*pubsub.Client, func()) {
+	t.Helper()
+	srv := pstest.NewServer()
+	var once sync.Once
+	closeSrv := func() { once.Do(func() { _ = srv.Close() }) }
+	t.Cleanup(closeSrv)
+
+	client, err := pubsub.NewClient(context.Background(), testProject,
+		option.WithEndpoint(srv.Addr),
+		option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	)
+	if err != nil {
+		t.Fatalf("failed to create fake pubsub client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client, closeSrv
+}
+
+// createSubscription provisions a topic and subscription on the fake so that an
+// admin GetSubscription lookup succeeds.
+func createSubscription(t *testing.T, client *pubsub.Client, subID string) {
+	t.Helper()
+	ctx := context.Background()
+	topic := "projects/" + testProject + "/topics/health-topic"
+	if _, err := client.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topic}); err != nil {
+		t.Fatalf("failed to create topic: %v", err)
+	}
+	if _, err := client.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{
+		Name:  "projects/" + testProject + "/subscriptions/" + subID,
+		Topic: topic,
+	}); err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+}
+
+func TestHealthCheck_Healthy(t *testing.T) {
+	client, _ := newFakePubSub(t)
+	createSubscription(t, client, "sub-1")
+
+	flow := &PubSubMQFlow{
+		client:          client,
+		requestChannels: []RequestChannelData{{subscriberID: "sub-1"}},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := flow.HealthCheck(ctx); err != nil {
+		t.Errorf("expected healthy, got error: %v", err)
+	}
+}
+
+func TestHealthCheck_MissingSubscription(t *testing.T) {
+	client, _ := newFakePubSub(t)
+	// No subscription created.
+
+	flow := &PubSubMQFlow{
+		client:          client,
+		requestChannels: []RequestChannelData{{subscriberID: "missing-sub"}},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := flow.HealthCheck(ctx); err == nil {
+		t.Error("expected error for missing subscription, got nil")
+	}
+}
+
+// TestHealthCheck_BrokerUnreachable is the regression guard for #246: an
+// unreachable Pub/Sub backend must mark the pod not-ready.
+func TestHealthCheck_BrokerUnreachable(t *testing.T) {
+	client, closeSrv := newFakePubSub(t)
+	createSubscription(t, client, "sub-1")
+
+	flow := &PubSubMQFlow{
+		client:          client,
+		requestChannels: []RequestChannelData{{subscriberID: "sub-1"}},
+	}
+
+	// Take the broker down before probing. The admin RPC retries on Unavailable,
+	// so bound the probe with a short deadline (the real /readyz path uses the
+	// health server's checkerTimeout) and assert it surfaces an error.
+	closeSrv()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := flow.HealthCheck(ctx); err == nil {
+		t.Error("expected error when broker is unreachable, got nil")
+	}
 }
