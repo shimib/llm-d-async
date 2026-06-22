@@ -258,3 +258,53 @@ tests:
             name: ap-config
             configMap:
               name: RELEASE-NAME-async-processor-config
+
+  - it: should auto-select gcp-pubsub-gated when a topic declares a gate_type
+    set:
+      ap.redis.enabled: false
+      ap.gcpPubSub.enabled: true
+      ap.gcpPubSub.resultTopicId: "test-result-topic"
+      ap.gcpPubSub.topicsConfig:
+        - subscriber_id: "sub-1"
+          igw_base_url: "http://igw:80"
+          gate_type: "redis-quota"
+          gate_params:
+            address: "redis:6379"
+            attribute: "team"
+            mode: "concurrency"
+            limit: "5"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --message-queue-impl=gcp-pubsub-gated
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --message-queue-impl=gcp-pubsub
+
+  - it: should keep plain gcp-pubsub when no topic declares a gate_type
+    set:
+      ap.redis.enabled: false
+      ap.gcpPubSub.enabled: true
+      ap.gcpPubSub.resultTopicId: "test-result-topic"
+      ap.gcpPubSub.topicsConfig:
+        - subscriber_id: "sub-1"
+          igw_base_url: "http://igw:80"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --message-queue-impl=gcp-pubsub
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --message-queue-impl=gcp-pubsub-gated
+
+  - it: should honor an explicit gcp-pubsub-gated messageQueueImpl override
+    set:
+      ap.redis.enabled: false
+      ap.gcpPubSub.enabled: true
+      ap.gcpPubSub.requestSubscriberId: "test-sub"
+      ap.gcpPubSub.resultTopicId: "test-topic"
+      ap.messageQueueImpl: "gcp-pubsub-gated"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --message-queue-impl=gcp-pubsub-gated

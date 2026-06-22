@@ -70,7 +70,12 @@ ap:
     enabled: true
     port: 9090
     secure: false
-  # messageQueueImpl: "redis-sortedset" # can be "redis-sortedset", "redis-pubsub", or "gcp-pubsub"
+  # Message queue implementation. Supported: "redis-sortedset", "redis-pubsub",
+  # "gcp-pubsub", "gcp-pubsub-gated". Leave empty to auto-select: redis-pubsub by
+  # default, and for GCP Pub/Sub "gcp-pubsub-gated" when any gcpPubSub.topicsConfig
+  # entry declares a gate_type (per-topic gates only take effect in gated mode),
+  # otherwise "gcp-pubsub".
+  messageQueueImpl: ""
   gcpPubSub:
     enabled: false
     requestSubscriberId: ""

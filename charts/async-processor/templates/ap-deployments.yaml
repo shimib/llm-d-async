@@ -61,7 +61,18 @@ spec:
           {{- end }}
           {{- end }}
           {{- else if .Values.ap.gcpPubSub.enabled }}
-          - --message-queue-impl=gcp-pubsub
+          {{- /* Honor an explicit gcp-pubsub* messageQueueImpl; otherwise auto-select
+                 gcp-pubsub-gated when any topic declares a gate_type (per-topic gates
+                 only take effect in gated mode). */}}
+          {{- $mqImpl := "gcp-pubsub" }}
+          {{- if and .Values.ap.messageQueueImpl (hasPrefix "gcp-pubsub" .Values.ap.messageQueueImpl) }}
+          {{- $mqImpl = .Values.ap.messageQueueImpl }}
+          {{- else }}
+          {{- range .Values.ap.gcpPubSub.topicsConfig }}
+          {{- if .gate_type }}{{- $mqImpl = "gcp-pubsub-gated" }}{{- end }}
+          {{- end }}
+          {{- end }}
+          - --message-queue-impl={{ $mqImpl }}
           - --pubsub.result-topic-id={{ .Values.ap.gcpPubSub.resultTopicId }}
           {{- if .Values.ap.gcpPubSub.topicsConfig }}
           - --pubsub.topics-config-file=/etc/async-processor/config/pubsub-topics.json
