@@ -369,6 +369,18 @@ Transforms are configured with `--transform-config-file`, pointing at a JSON obj
 
 Each entry has a unique `name`, a registered plugin `type`, and opaque `parameters`. Unknown top-level fields are rejected. When the flag is empty, no transforms are loaded and behavior is unchanged.
 
+With the Helm chart, set `ap.transformConfig` to this same object; the chart renders it to a config file and wires `--transform-config-file` automatically:
+
+```yaml
+ap:
+  transformConfig:
+    requestTransforms:
+      - name: "whisper-multipart"
+        type: "gcs_uri_multipart"
+        parameters:
+          providers: ["whisper"]
+```
+
 ### `gcs_uri_multipart` plugin
 
 Rewrites a JSON body into `multipart/form-data` for endpoints that take a signed object URL. Because producers can't put raw media bytes on the broker, the queued `payload` carries a signed URL (e.g. a GCS V4 signed URL) in a `gcs_uri` field.
