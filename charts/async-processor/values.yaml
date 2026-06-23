@@ -15,8 +15,10 @@ ap:
       cpu: 500m
       memory: 512Mi
   image:
-    repository: ghcr.io/llm-d-incubation/async-processor
-    tag: 0.6.0
+    repository: ghcr.io/llm-d-incubation/llm-d-async
+    # Image tag. Leave empty to track the chart's appVersion (recommended so the
+    # image stays in sync with the chart). Set explicitly to pin a different tag.
+    tag: ""
   imagePullPolicy: Always
   concurrency: 8
   drainTimeout: "2m"
@@ -89,6 +91,9 @@ ap:
   messageQueueImpl: ""
   gcpPubSub:
     enabled: false
+    # GCP project ID for the Pub/Sub client. Required for the gcp-pubsub backends:
+    # the process panics on startup ("projectID string is empty") if unset.
+    projectId: ""
     requestSubscriberId: ""
     resultTopicId: ""
     requestPathURL: "/v1/completions"

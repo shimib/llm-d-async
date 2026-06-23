@@ -73,6 +73,9 @@ spec:
           {{- end }}
           {{- end }}
           - --message-queue-impl={{ $mqImpl }}
+          {{- if .Values.ap.gcpPubSub.projectId }}
+          - --pubsub.project-id={{ .Values.ap.gcpPubSub.projectId }}
+          {{- end }}
           - --pubsub.result-topic-id={{ .Values.ap.gcpPubSub.resultTopicId }}
           {{- if .Values.ap.gcpPubSub.topicsConfig }}
           - --pubsub.topics-config-file=/etc/async-processor/config/pubsub-topics.json
@@ -113,7 +116,7 @@ spec:
           - --tls-cert=/etc/tls/{{ .Values.ap.tls.certKey }}
           - --tls-key=/etc/tls/{{ .Values.ap.tls.keyKey }}
           {{- end }}
-        image: "{{ .Values.ap.image.repository }}:{{ .Values.ap.image.tag }}"
+        image: "{{ .Values.ap.image.repository }}:{{ .Values.ap.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: "{{ .Values.ap.imagePullPolicy }}"
         env:
           - name: LOG_LEVEL

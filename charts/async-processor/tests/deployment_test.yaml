@@ -153,6 +153,43 @@ tests:
           path: spec.template.spec.containers[0].args
           content: --message-queue-impl=gcp-pubsub
 
+  - it: should default the image to the published repo with the appVersion tag
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/llm-d-incubation/llm-d-async:0.7.0
+
+  - it: should honor an explicit image tag override
+    set:
+      ap.image.tag: "v1.2.3"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/llm-d-incubation/llm-d-async:v1.2.3
+
+  - it: should render --pubsub.project-id when projectId is set
+    set:
+      ap.redis.enabled: false
+      ap.gcpPubSub.enabled: true
+      ap.gcpPubSub.projectId: "my-project"
+      ap.gcpPubSub.requestSubscriberId: "test-sub"
+      ap.gcpPubSub.resultTopicId: "test-topic"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --pubsub.project-id=my-project
+
+  - it: should not render --pubsub.project-id when projectId is unset
+    set:
+      ap.redis.enabled: false
+      ap.gcpPubSub.enabled: true
+      ap.gcpPubSub.requestSubscriberId: "test-sub"
+      ap.gcpPubSub.resultTopicId: "test-topic"
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --pubsub.project-id=
+
   - it: should inject OTel env vars when endpoint is set
     set:
       ap.otel.endpoint: "http://otel:4317"
