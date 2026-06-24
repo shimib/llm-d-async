@@ -1,0 +1,57 @@
+# Minimal, ephemeral Redis for the demo's per-team redis-quota dispatch gate.
+# Quota state is transient (concurrency counters / rate-limit windows), so
+# persistence is disabled. Not for production.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-quota
+  labels:
+    app: redis-quota
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-quota
+  template:
+    metadata:
+      labels:
+        app: redis-quota
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-quota
+  labels:
+    app: redis-quota
+spec:
+  selector:
+    app: redis-quota
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis

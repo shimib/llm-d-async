@@ -1,0 +1,96 @@
+# Scenario C — priority under saturation (GCP-native).
+#
+# Adds the GMP query frontend as the PromQL endpoint and per-team
+# prometheus-query gates whose budget drops as the inference pool gets busy
+# (vllm:num_requests_running). Each tier tolerates a different load level
+# (the "/N" denominator), so under saturation batch backs off first, then
+# standard, while premium keeps dispatching. standard/batch keep their
+# redis-quota cap via a composite gate.
+#
+# Saturation budget D = clamp(1 - sum(vllm:num_requests_running)/N, 0, 1):
+#   premium N=40 (tolerant) | standard N=20 | batch N=8 (backs off early)
+#
+# NOTE: GMP/Monarch ingestion lags real time by ~1-2 min, so the gate reacts
+# to saturation on that timescale — drive sustained load to see the effect.
+ap:
+  image:
+    repository: ghcr.io/llm-d-incubation/llm-d-async
+    tag: "v0.7.1"
+
+  messageQueueImpl: "gcp-pubsub-gated"
+  igwBaseURL: "http://IGW_HOST:80"
+
+  # PromQL endpoint = the in-cluster GMP query frontend (backed by Monarch).
+  prometheusURL: "http://gmp-frontend.NAMESPACE.svc.cluster.local:9090"
+  prometheusCacheTTL: "5s"
+
+  gcpPubSub:
+    enabled: true
+    projectId: "PROJECT_ID"
+    resultTopicId: "projects/PROJECT_ID/topics/results"
+    topicsConfig:
+      # premium: most tolerant of saturation, no quota.
+      - subscriber_id: "projects/PROJECT_ID/subscriptions/team-premium-requests-sub"
+        worker_pool_id: "premium"
+        inference_objective: "latency"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        gate_type: "prometheus-query"
+        gate_params:
+          query: "clamp(1 - sum(vllm:num_requests_running)/40, 0, 1)"
+          fallback: "1"
+
+      # standard: backs off at moderate saturation + concurrency quota 20.
+      - subscriber_id: "projects/PROJECT_ID/subscriptions/team-standard-requests-sub"
+        worker_pool_id: "standard"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        gate_type: "composite"
+        gate_params:
+          gates: |
+            [
+              {"gate_type":"prometheus-query","gate_params":{"query":"clamp(1 - sum(vllm:num_requests_running)/20, 0, 1)","fallback":"1"}},
+              {"gate_type":"redis-quota","gate_params":{"address":"redis-quota.NAMESPACE.svc.cluster.local:6379","attribute":"team","mode":"concurrency","limit":"20","prefix":"quota:"}}
+            ]
+
+      # batch: backs off earliest + tight concurrency quota 2.
+      - subscriber_id: "projects/PROJECT_ID/subscriptions/team-batch-requests-sub"
+        worker_pool_id: "batch"
+        inference_objective: "throughput"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        gate_type: "composite"
+        gate_params:
+          gates: |
+            [
+              {"gate_type":"prometheus-query","gate_params":{"query":"clamp(1 - sum(vllm:num_requests_running)/8, 0, 1)","fallback":"1"}},
+              {"gate_type":"redis-quota","gate_params":{"address":"redis-quota.NAMESPACE.svc.cluster.local:6379","attribute":"team","mode":"concurrency","limit":"2","prefix":"quota:"}}
+            ]
+
+  workerPools:
+    - id: "premium"
+      workers: 16
+    - id: "standard"
+      workers: 8
+    - id: "batch"
+      workers: 4
+
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+  metrics:
+    enabled: true
+  podMonitor:
+    enabled: false
+  modelServerMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+  grafana:
+    dashboards:
+      enabled: false
