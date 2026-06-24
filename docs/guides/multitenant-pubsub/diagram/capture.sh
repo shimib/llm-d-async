@@ -9,7 +9,7 @@ set -e
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="file://$DIR/architecture.html"
 FRAMES="$(mktemp -d)"
-LOOP_MS=12000; FPS=10; STEP=$((1000/FPS)); i=0
+LOOP_MS=20000; FPS=10; STEP=$((1000/FPS)); i=0
 
 for ((t=0; t<LOOP_MS; t+=STEP)); do
   b=$t; [ "$b" -lt 50 ] && b=50
