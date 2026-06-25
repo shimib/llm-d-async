@@ -11,8 +11,7 @@ and the loop tells the **priority-under-saturation** story — as vLLM saturates
 | :-- | :-- |
 | `architecture.html` | The source — self-contained animated SVG (CSS keyframes + SMIL). Open in a browser; animates live. Edit this. |
 | `architecture.gif` | Looping GIF for embedding in a README (GitHub strips inline-SVG animation, so use the GIF). |
-| `architecture.mp4` | Smaller/sharper version for slides or a web page. |
-| `capture.sh` | Regenerates the GIF/MP4 from the HTML. |
+| `capture.sh` | Regenerates the GIF from the HTML (and an `architecture.mp4` for slides/web, which is not committed). |
 
 ## View it live
 
