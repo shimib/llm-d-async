@@ -10,9 +10,9 @@
     --premium:#8b7bff; --standard:#2dd4bf; --batch:#f5a623;
     --ok:#37d67a; --bad:#ff5d6c; --warn:#ffcc4d;
     /* one shared loop period — every timed effect uses % of this, so all stay in sync */
-    --loop:20s;
+    --loop:18s;
   }
-  html,body{margin:0;background:radial-gradient(1200px 700px at 30% 10%, #131d38 0%, var(--bg) 60%);}
+  html,body{margin:0;background:#0b1020;}  /* flat bg: avoids GIF banding */
   .wrap{width:1280px;height:760px;margin:0 auto;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;}
   text{fill:var(--ink);font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;}
   .title{font-size:26px;font-weight:700;letter-spacing:.3px;}
@@ -50,7 +50,7 @@
   @keyframes quotaPulse{0%,33%{opacity:.25}42%,70%{opacity:1}82%,100%{opacity:.25}}
   .quota-hot{animation:quotaPulse var(--loop) ease-in-out infinite;}
 
-  .flowline{stroke-dasharray:4 8;animation:dash 2.6s linear infinite;}
+  .flowline{stroke-dasharray:4 8;animation:dash 3.6s linear infinite;}
   @keyframes dash{to{stroke-dashoffset:-24}}
 </style>
 </head>
@@ -105,19 +105,22 @@
 
   <!-- ============ FLOWING DOTS (under the boxes: show only on the wires) ============ -->
   <g class="dot premium">
-    <circle r="6"><animateMotion dur="5s" begin="0s"   repeatCount="indefinite"><mpath xlink:href="#laneP"/></animateMotion></circle>
-    <circle r="6"><animateMotion dur="5s" begin="1.7s" repeatCount="indefinite"><mpath xlink:href="#laneP"/></animateMotion></circle>
-    <circle r="6"><animateMotion dur="5s" begin="3.4s" repeatCount="indefinite"><mpath xlink:href="#laneP"/></animateMotion></circle>
+    <circle r="6"><animateMotion dur="9s" begin="0s"    repeatCount="indefinite"><mpath xlink:href="#laneP"/></animateMotion></circle>
+    <circle r="6"><animateMotion dur="9s" begin="2.25s" repeatCount="indefinite"><mpath xlink:href="#laneP"/></animateMotion></circle>
+    <circle r="6"><animateMotion dur="9s" begin="4.5s"  repeatCount="indefinite"><mpath xlink:href="#laneP"/></animateMotion></circle>
+    <circle r="6"><animateMotion dur="9s" begin="6.75s" repeatCount="indefinite"><mpath xlink:href="#laneP"/></animateMotion></circle>
   </g>
   <g class="dot standard">
-    <circle r="6" class="stddot"><animateMotion dur="5s" begin="0.8s" repeatCount="indefinite"><mpath xlink:href="#laneS"/></animateMotion></circle>
-    <circle r="6" class="stddot"><animateMotion dur="5s" begin="2.5s" repeatCount="indefinite"><mpath xlink:href="#laneS"/></animateMotion></circle>
-    <circle r="6" class="stddot"><animateMotion dur="5s" begin="4.2s" repeatCount="indefinite"><mpath xlink:href="#laneS"/></animateMotion></circle>
+    <circle r="6" class="stddot"><animateMotion dur="9s" begin="0s"    repeatCount="indefinite"><mpath xlink:href="#laneS"/></animateMotion></circle>
+    <circle r="6" class="stddot"><animateMotion dur="9s" begin="2.25s" repeatCount="indefinite"><mpath xlink:href="#laneS"/></animateMotion></circle>
+    <circle r="6" class="stddot"><animateMotion dur="9s" begin="4.5s"  repeatCount="indefinite"><mpath xlink:href="#laneS"/></animateMotion></circle>
+    <circle r="6" class="stddot"><animateMotion dur="9s" begin="6.75s" repeatCount="indefinite"><mpath xlink:href="#laneS"/></animateMotion></circle>
   </g>
   <g class="dot batch">
-    <circle r="6" class="batchdot"><animateMotion dur="5s" begin="0.3s" repeatCount="indefinite"><mpath xlink:href="#laneB"/></animateMotion></circle>
-    <circle r="6" class="batchdot"><animateMotion dur="5s" begin="2.0s" repeatCount="indefinite"><mpath xlink:href="#laneB"/></animateMotion></circle>
-    <circle r="6" class="batchdot"><animateMotion dur="5s" begin="3.7s" repeatCount="indefinite"><mpath xlink:href="#laneB"/></animateMotion></circle>
+    <circle r="6" class="batchdot"><animateMotion dur="9s" begin="0s"    repeatCount="indefinite"><mpath xlink:href="#laneB"/></animateMotion></circle>
+    <circle r="6" class="batchdot"><animateMotion dur="9s" begin="2.25s" repeatCount="indefinite"><mpath xlink:href="#laneB"/></animateMotion></circle>
+    <circle r="6" class="batchdot"><animateMotion dur="9s" begin="4.5s"  repeatCount="indefinite"><mpath xlink:href="#laneB"/></animateMotion></circle>
+    <circle r="6" class="batchdot"><animateMotion dur="9s" begin="6.75s" repeatCount="indefinite"><mpath xlink:href="#laneB"/></animateMotion></circle>
   </g>
 
   <!-- ============ NODES (drawn over the wires + dots) ============ -->
@@ -165,8 +168,11 @@
 
   <!-- side inputs -->
   <rect class="node" x="690" y="648" width="120" height="44"/><text class="small" x="702" y="668">Redis</text><text class="small" x="702" y="684" style="fill:var(--muted)">quota counters</text>
-  <path class="wire dim flowline" d="M750,648 V596" marker-end="url(#ahd)"/>
-  <circle cx="770" cy="676" r="6" fill="var(--batch)" class="quota-hot"/><text class="small quota-hot" x="782" y="680" style="fill:var(--batch)">team=batch ≥ 2</text>
+  <!-- Redis feeds the per-team quota gates -->
+  <path class="wire dim flowline" d="M748,648 V586" marker-end="url(#ahd)"/>
+  <path class="wire dim flowline" d="M806,660 H836 V360 H812" marker-end="url(#ahd)"/>
+  <text class="small" x="842" y="470" style="fill:var(--muted)">quota</text>
+  <circle cx="648" cy="676" r="6" fill="var(--batch)" class="quota-hot"/><text class="small quota-hot" x="540" y="680" style="fill:var(--batch)">team=batch ≥ 2</text>
 
   <rect class="node" x="900" y="36" width="184" height="44"/><text class="small" x="914" y="56">Prometheus / GMP</text><text class="small" x="914" y="72" style="fill:var(--muted)">vllm:num_requests_running</text>
   <path class="wire dim flowline" d="M958,80 C910,120 858,126 814,158" marker-end="url(#ahd)"/>
@@ -188,7 +194,7 @@
   <path class="wire dim" d="M862,628 C980,652 1010,660 1085,668"/>
 
   <!-- legend -->
-  <g transform="translate(40,724)">
+  <g transform="translate(40,752)">
     <circle cx="6" cy="-4" r="5" fill="var(--premium)"/><text class="small" x="18" y="0">premium</text>
     <circle cx="96" cy="-4" r="5" fill="var(--standard)"/><text class="small" x="108" y="0">standard</text>
     <circle cx="186" cy="-4" r="5" fill="var(--batch)"/><text class="small" x="198" y="0">batch</text>
