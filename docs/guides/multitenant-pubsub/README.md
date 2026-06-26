@@ -211,6 +211,12 @@ backlog per team** from the native `pubsub.googleapis.com/subscription/num_undel
 metric. **Required:** the collector identity needs `roles/monitoring.metricWriter`, or GMP scrapes
 but can't write.
 
+It also includes panels for the **gate metrics** from #290/#291:
+`async_dispatch_budget` (gate openness 0–1 per team), `async_gate_decisions_total` (by
+`reason`: gate_closed / quota_exhausted / dropped / error), and worker utilization
+(`async_inflight_requests ÷ async_pool_worker_limit`). These need an image **newer than v0.7.2**
+(the metrics merged after that release); on v0.7.2 those panels show no data.
+
 ## Step 8 — Alternative: self-hosted Prometheus + Grafana (option B)
 
 Works on any cluster, and the gates query Prometheus in **real time** (no Monarch lag). The chart
