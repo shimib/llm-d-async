@@ -17,15 +17,23 @@ observed through either **GCP Cloud Monitoring** or a **self-hosted Prometheus +
 | **standard** | `team-standard-requests-sub` | 8 | medium (`N=20`) | concurrency **20** | (default) |
 | **batch** (low prio) | `team-batch-requests-sub` | 4 | low (`N=8`) — backs off first | concurrency **2** | `throughput` |
 
-- **Quota** — the `redis-quota` gate caps a team's concurrent in-flight requests, keyed on the
-  `team` Pub/Sub message attribute. Set the limit **below** the pool's worker count, or the workers
-  bind first (see Notes).
-- **Priority under load** — a per-team `prometheus-query` gate sets the dispatch budget from
-  inference-pool saturation: `D = clamp(1 - sum(vllm:num_requests_running)/N, 0, 1)`. Smaller `N`
-  ⇒ backs off at lower load, so premium (`N=40`) keeps flowing while batch (`N=8`) closes first.
+The demo uses **both gate levels** introduced in [#276](https://github.com/llm-d-incubation/llm-d-async/pull/276):
 
-Per-team gates require the **`gcp-pubsub-gated`** message-queue implementation (the chart selects it
-automatically when a topic declares a `gate_type`).
+- **Quota — a queue-level gate** (`redis-quota`, per topic): caps a team's concurrent in-flight
+  requests, keyed on the `team` Pub/Sub message attribute. On refuse it **nacks** the message back
+  to the broker (admission control). Set the limit **below** the pool's worker count, or the workers
+  bind first (see Notes).
+- **Priority under load — a pool-level gate** (`wait-on-refuse` wrapping a `prometheus-query`, per
+  worker pool): sets a budget from inference-pool saturation,
+  `D = clamp(1 - sum(vllm:num_requests_running)/N, 0, 1)`. Smaller `N` ⇒ backs off at lower load
+  (premium `N=40`, standard `20`, batch `8`). Because it's a **pool** gate, an over-saturation
+  refuse becomes **`ActionWait`**: the worker **parks in-memory and polls** until capacity opens —
+  no broker nack/redelivery churn. So under load batch parks first while premium keeps dispatching.
+
+> **Queue vs pool gates:** queue gates run at admission (refuse → nack to broker, freeing the worker
+> for other queues); pool gates run inside the worker loop and can `ActionWait` (park in-memory) to
+> regulate capacity shared by a pool. Per-team gates require the **`gcp-pubsub-gated`** message-queue
+> implementation, and **pool gates require the binary from #276** (pin an image that includes it).
 
 ### Three things to know up front
 
@@ -183,8 +191,11 @@ kubectl port-forward -n NAMESPACE deploy/gmp-frontend 9090:9090 &
 curl -s localhost:9090/api/v1/query --data-urlencode \
   'query=clamp(1 - sum(vllm:num_requests_running)/8, 0, 1)'   # batch budget
 ```
-As saturation rises, batch's budget → 0 first (in-flight → 0), premium keeps dispatching. (GMP /
-Monarch lags real time ~1–2 min, so the control is bang-bang on that timescale.)
+As saturation rises, batch's pool-gate budget → 0 first: its workers **park in-memory (`ActionWait`)**
+rather than nacking, so batch's in-flight drops while premium keeps dispatching. Unlike the
+queue-level quota (Scenario B), this does **not** churn the broker backlog. (With GMP, Monarch lags
+real time ~1–2 min, so the control is bang-bang on that timescale; the self-hosted Prometheus path
+reacts within one scrape.)
 
 ## Step 7 — Dashboards — option A (Cloud Monitoring)
 

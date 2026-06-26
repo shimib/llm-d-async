@@ -1,26 +1,26 @@
-# Scenario C — priority under saturation (GCP-native).
+# Scenario C — priority under saturation (GCP-native, GMP), using BOTH gate
+# levels (#276):
 #
-# Adds the GMP query frontend as the PromQL endpoint and per-team
-# prometheus-query gates whose budget drops as the inference pool gets busy
-# (vllm:num_requests_running). Each tier tolerates a different load level
-# (the "/N" denominator), so under saturation batch backs off first, then
-# standard, while premium keeps dispatching. standard/batch keep their
-# redis-quota cap via a composite gate.
+#  - QUEUE-level gate (per topic): redis-quota — per-team fairness quota; nacks
+#    over-quota messages back to the broker.
+#  - POOL-level gate (per worker pool): wait-on-refuse(prometheus-query) — the
+#    shared inference-saturation guard; on refuse the worker PARKS in-memory
+#    (ActionWait) instead of nacking. Premium tolerates the most load (N=40),
+#    batch the least (N=8), so under saturation batch parks first while premium
+#    keeps dispatching.
 #
-# Saturation budget D = clamp(1 - sum(vllm:num_requests_running)/N, 0, 1):
-#   premium N=40 (tolerant) | standard N=20 | batch N=8 (backs off early)
-#
-# NOTE: GMP/Monarch ingestion lags real time by ~1-2 min, so the gate reacts
-# to saturation on that timescale — drive sustained load to see the effect.
+# PromQL endpoint = the GMP query frontend (manifests/gmp-frontend.yaml).
+# NOTE: GMP/Monarch lags real time ~1-2 min, so gates react on that timescale.
 ap:
   image:
+    # Pool-level gates need the binary from PR #276. Pin a release/commit image
+    # that includes it — v0.7.1 predates #276 and silently ignores pool gate_type.
     repository: ghcr.io/llm-d-incubation/llm-d-async
-    tag: "v0.7.1"
+    tag: "v0.7.1"   # TODO: bump to the first published tag containing #276
 
   messageQueueImpl: "gcp-pubsub-gated"
   igwBaseURL: "http://IGW_HOST:80"
 
-  # PromQL endpoint = the in-cluster GMP query frontend (backed by Monarch).
   prometheusURL: "http://gmp-frontend.NAMESPACE.svc.cluster.local:9090"
   prometheusCacheTTL: "5s"
 
@@ -29,51 +29,60 @@ ap:
     projectId: "PROJECT_ID"
     resultTopicId: "projects/PROJECT_ID/topics/results"
     topicsConfig:
-      # premium: most tolerant of saturation, no quota.
+      # premium: no queue gate (priority handled by its pool gate below).
       - subscriber_id: "projects/PROJECT_ID/subscriptions/team-premium-requests-sub"
         worker_pool_id: "premium"
         inference_objective: "latency"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
-        gate_type: "prometheus-query"
-        gate_params:
-          query: "clamp(1 - sum(vllm:num_requests_running)/40, 0, 1)"
-          fallback: "1"
 
-      # standard: backs off at moderate saturation + concurrency quota 20.
+      # standard: queue-level per-team quota.
       - subscriber_id: "projects/PROJECT_ID/subscriptions/team-standard-requests-sub"
         worker_pool_id: "standard"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
-        gate_type: "composite"
+        gate_type: "redis-quota"
         gate_params:
-          gates: |
-            [
-              {"gate_type":"prometheus-query","gate_params":{"query":"clamp(1 - sum(vllm:num_requests_running)/20, 0, 1)","fallback":"1"}},
-              {"gate_type":"redis-quota","gate_params":{"address":"redis-quota.NAMESPACE.svc.cluster.local:6379","attribute":"team","mode":"concurrency","limit":"20","prefix":"quota:"}}
-            ]
+          address: "redis-quota.NAMESPACE.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          limit: "20"
+          prefix: "quota:"
 
-      # batch: backs off earliest + tight concurrency quota 2.
+      # batch: tight queue-level quota.
       - subscriber_id: "projects/PROJECT_ID/subscriptions/team-batch-requests-sub"
         worker_pool_id: "batch"
         inference_objective: "throughput"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
-        gate_type: "composite"
+        gate_type: "redis-quota"
         gate_params:
-          gates: |
-            [
-              {"gate_type":"prometheus-query","gate_params":{"query":"clamp(1 - sum(vllm:num_requests_running)/8, 0, 1)","fallback":"1"}},
-              {"gate_type":"redis-quota","gate_params":{"address":"redis-quota.NAMESPACE.svc.cluster.local:6379","attribute":"team","mode":"concurrency","limit":"2","prefix":"quota:"}}
-            ]
+          address: "redis-quota.NAMESPACE.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          limit: "2"
+          prefix: "quota:"
 
+  # POOL-level saturation gates (wait-on-refuse -> park in-memory on saturation).
   workerPools:
     - id: "premium"
       workers: 16
+      gate_type: "wait-on-refuse"
+      gate_params:
+        gate: |
+          {"gate_type":"prometheus-query","gate_params":{"query":"clamp(1 - sum(vllm:num_requests_running)/40, 0, 1)","fallback":"1"}}
     - id: "standard"
       workers: 8
+      gate_type: "wait-on-refuse"
+      gate_params:
+        gate: |
+          {"gate_type":"prometheus-query","gate_params":{"query":"clamp(1 - sum(vllm:num_requests_running)/20, 0, 1)","fallback":"1"}}
     - id: "batch"
       workers: 4
+      gate_type: "wait-on-refuse"
+      gate_params:
+        gate: |
+          {"gate_type":"prometheus-query","gate_params":{"query":"clamp(1 - sum(vllm:num_requests_running)/8, 0, 1)","fallback":"1"}}
 
   resources:
     requests:
