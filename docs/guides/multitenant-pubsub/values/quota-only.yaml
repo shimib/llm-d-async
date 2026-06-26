@@ -10,12 +10,12 @@
 # via worker-pool size; quota via the redis-quota gate. Scenarios A + B.
 ap:
   image:
-    # Pin the v0.7.1 release. We set the tag explicitly because an extracted
+    # Pin the v0.7.2 release. We set the tag explicitly because an extracted
     # (in-repo) chart still has appVersion 0.7.0, so the tag="" default would
     # not resolve to a published image. (The *published* OCI chart for 0.7.1
     # resolves tag="" correctly via the release script — see #281.)
     repository: ghcr.io/llm-d-incubation/llm-d-async
-    tag: "v0.7.1"
+    tag: "v0.7.2"
 
   messageQueueImpl: "gcp-pubsub-gated"
   igwBaseURL: "http://IGW_HOST:80"

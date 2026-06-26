@@ -12,10 +12,9 @@
 # (real-time). vLLM is scraped by manifests/prometheus-vllm-podmonitor.yaml.
 ap:
   image:
-    # Pool-level gates need the binary from PR #276. Pin a release/commit image
-    # that includes it — v0.7.1 predates #276 and silently ignores pool gate_type.
+    # v0.7.2 is the first release that includes pool-level gates (#276).
     repository: ghcr.io/llm-d-incubation/llm-d-async
-    tag: "v0.7.1"   # TODO: bump to the first published tag containing #276
+    tag: "v0.7.2"
 
   messageQueueImpl: "gcp-pubsub-gated"
   igwBaseURL: "http://IGW_HOST:80"

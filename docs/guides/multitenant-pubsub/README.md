@@ -76,7 +76,7 @@ scripts/
   vLLM model server. See the [e2e-deploy guide](../e2e-deploy.md) to bring one up. (Option A assumes
   GKE + Google Managed Prometheus; option B works on any cluster.)
 - `kubectl`, `helm` (v3), and `gcloud`.
-- The async-processor chart **v0.7.1+** (adds `gcp-pubsub-gated`, `ap.gcpPubSub.projectId`, and the
+- The async-processor chart **v0.7.2+** (adds `gcp-pubsub-gated`, `ap.gcpPubSub.projectId`, and the
   correct default image). This guide installs the in-repo chart at `../../../charts/async-processor`.
 
 Replace these placeholders throughout `values/` and the commands below:
@@ -247,7 +247,7 @@ carry that label, use the dedicated `prometheus-vllm-podmonitor.yaml` (adjust it
 
 ## Notes & gotchas
 
-- **Image pin.** Pin a published release tag (e.g. `v0.7.1`) under
+- **Image pin.** Pin a published release tag (e.g. `v0.7.2`) under
   `ghcr.io/llm-d-incubation/llm-d-async`. The *published* OCI chart resolves `tag: ""` to the right
   image automatically, but the **in-repo chart's appVersion may lag the published image tag**, so an
   explicit pin avoids an ImagePullBackOff.
