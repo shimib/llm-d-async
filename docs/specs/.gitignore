@@ -1,0 +1,4 @@
+# TLC / PlusCal generated artifacts
+states/
+*.old
+*.toolbox/
