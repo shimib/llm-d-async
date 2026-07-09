@@ -1,21 +1,23 @@
-# Minimal, ephemeral Redis for the demo's per-team redis-quota dispatch gate.
-# Quota state is transient (concurrency counters / rate-limit windows), so
-# persistence is disabled. Not for production.
+# Minimal, ephemeral Redis for the demo. It backs both the per-team redis-quota
+# dispatch gate (concurrency counters / rate-limit windows) and — for the Redis
+# SortedSet queue backend — the per-team request queues and result list. All of
+# that state is transient for the demo, so persistence is disabled. Not for
+# production.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: redis-quota
+  name: redis
   labels:
-    app: redis-quota
+    app: redis
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: redis-quota
+      app: redis
   template:
     metadata:
       labels:
-        app: redis-quota
+        app: redis
     spec:
       containers:
         - name: redis
@@ -45,12 +47,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: redis-quota
+  name: redis
   labels:
-    app: redis-quota
+    app: redis
 spec:
   selector:
-    app: redis-quota
+    app: redis
   ports:
     - port: 6379
       targetPort: 6379

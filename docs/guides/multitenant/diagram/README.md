@@ -1,9 +1,13 @@
 # Animated architecture diagram
 
-A slick, looping diagram of the multi-tenant Pub/Sub demo: messages flow per-team
-through subscriptions → worker pools → dispatch gates → the inference gateway → vLLM,
+A slick, looping diagram of the multi-tenant scenario: messages flow per-team
+through the queue → worker pools → dispatch gates → the inference gateway → vLLM,
 and the loop tells the **priority-under-saturation** story — as vLLM saturates, the
 **batch** gate closes and its backlog grows while **premium** keeps flowing.
+
+> The animation draws the **GCP Pub/Sub** backend as the example. The **Redis
+> SortedSet** backend behaves identically (per-team sorted-set queues in place of
+> topics/subscriptions, dispatched earliest-deadline-first).
 
 ## Files
 

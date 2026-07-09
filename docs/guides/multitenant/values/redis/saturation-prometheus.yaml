@@ -1,0 +1,112 @@
+# Redis SortedSet queue backend + self-hosted Prometheus + Grafana, using BOTH
+# gate levels (#276):
+#
+#  - QUEUE-level gate (per queue): redis-quota — the per-team fairness quota.
+#    On refuse it re-enqueues the message (admission control).
+#  - POOL-level gate (per worker pool): wait-on-refuse(prometheus-query) — the
+#    shared inference-saturation guard. On refuse the worker PARKS in-memory
+#    (ActionWait) and polls until capacity opens. Premium tolerates the most
+#    load (N=40), batch the least (N=8), so under saturation batch parks first
+#    while premium keeps dispatching.
+#
+# prometheusURL points at the in-cluster kube-prometheus-stack Prometheus.
+# vLLM is scraped by manifests/prometheus-vllm-podmonitor.yaml. The same Redis
+# instance (manifests/redis.yaml) backs the request queues and quota counters;
+# queues are deadline-scored, so within a team dispatch is earliest-deadline-first.
+ap:
+  image:
+    # v0.7.2 is the first release that includes pool-level gates (#276).
+    repository: ghcr.io/llm-d-incubation/llm-d-async
+    tag: "v0.7.2"
+
+  messageQueueImpl: "redis-sortedset"
+  igwBaseURL: "http://IGW_HOST:80"
+
+  # PromQL endpoint for the saturation pool gates.
+  prometheusURL: "http://kps-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
+  prometheusCacheTTL: "5s"
+
+  redis:
+    enabled: true
+    url: "redis://redis.NAMESPACE.svc.cluster.local:6379"
+    resultQueueName: "results-list"
+    pollIntervalMs: 500
+    batchSize: 10
+    queuesConfig:
+      # premium: no queue gate (priority handled by its pool gate below).
+      - queue_name: "team-premium-requests"
+        worker_pool_id: "premium"
+        inference_objective: "latency"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+
+      # standard: queue-level per-team quota (re-enqueue on refuse).
+      - queue_name: "team-standard-requests"
+        worker_pool_id: "standard"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        gate_type: "redis-quota"
+        gate_params:
+          address: "redis.NAMESPACE.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          limit: "20"
+          prefix: "quota:"
+
+      # batch: tight queue-level quota.
+      - queue_name: "team-batch-requests"
+        worker_pool_id: "batch"
+        inference_objective: "throughput"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        gate_type: "redis-quota"
+        gate_params:
+          address: "redis.NAMESPACE.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          limit: "2"
+          prefix: "quota:"
+
+  # POOL-level saturation gates: wait-on-refuse wraps a prometheus-query budget
+  # so an over-saturation refuse becomes ActionWait (park in-memory, no re-enqueue).
+  workerPools:
+    - id: "premium"
+      workers: 16
+      gate_type: "wait-on-refuse"
+      gate_params:
+        gate: |
+          {"gate_type":"prometheus-query","gate_params":{"query":"clamp(1 - sum(vllm:num_requests_running)/40, 0, 1)","fallback":"1"}}
+    - id: "standard"
+      workers: 8
+      gate_type: "wait-on-refuse"
+      gate_params:
+        gate: |
+          {"gate_type":"prometheus-query","gate_params":{"query":"clamp(1 - sum(vllm:num_requests_running)/20, 0, 1)","fallback":"1"}}
+    - id: "batch"
+      workers: 4
+      gate_type: "wait-on-refuse"
+      gate_params:
+        gate: |
+          {"gate_type":"prometheus-query","gate_params":{"query":"clamp(1 - sum(vllm:num_requests_running)/8, 0, 1)","fallback":"1"}}
+
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+  # Self-hosted Prometheus/Grafana observability (prometheus-operator native).
+  metrics:
+    enabled: true
+  podMonitor:
+    enabled: true
+    interval: "15s"
+  modelServerMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: true
+  grafana:
+    dashboards:
+      enabled: true

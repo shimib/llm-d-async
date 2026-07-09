@@ -1,59 +1,68 @@
-# Values for the multi-tenant Pub/Sub demo — QUOTA-ONLY phase (Scenarios A + B).
+# Values for the multi-tenant scenario — QUOTA-ONLY phase (Scenarios A + B),
+# Redis SortedSet queue backend.
 #
-# Replace the placeholders for your environment: PROJECT_ID, NAMESPACE,
-# IGW_HOST (inference gateway host), and the InferencePool / model to match your
-# own deployment (example here: vllm-llama3-8b-instruct / meta-llama/Llama-3.1-8B-Instruct).
+# Replace the placeholders for your environment: NAMESPACE, IGW_HOST (inference
+# gateway host), and the InferencePool / model to match your own deployment
+# (example here: vllm-llama3-8b-instruct / meta-llama/Llama-3.1-8B-Instruct).
 #
-# This phase drops the prometheus-saturation gates (cluster uses Google Managed
-# Prometheus; no in-cluster PromQL endpoint yet) and observability extras
-# (no Grafana / prometheus-operator CRDs). Per-team priority here is expressed
-# via worker-pool size; quota via the redis-quota gate. Scenarios A + B.
+# Per-team priority here is expressed via worker-pool size; quota via the
+# redis-quota gate. No pool-saturation gates and no Grafana/prometheus-operator
+# CRDs in this phase. Scenarios A + B.
+#
+# Note: Redis SortedSet scores each queue by the request `deadline`, so within a
+# team the processor dispatches earliest-deadline-first (Pub/Sub has no such
+# ordering). The same Redis instance (manifests/redis.yaml) backs both the
+# per-team request queues and the redis-quota counters.
 ap:
   image:
     # Pin the v0.7.2 release. We set the tag explicitly because an extracted
     # (in-repo) chart still has appVersion 0.7.0, so the tag="" default would
-    # not resolve to a published image. (The *published* OCI chart for 0.7.1
-    # resolves tag="" correctly via the release script — see #281.)
+    # not resolve to a published image.
     repository: ghcr.io/llm-d-incubation/llm-d-async
     tag: "v0.7.2"
 
-  messageQueueImpl: "gcp-pubsub-gated"
+  messageQueueImpl: "redis-sortedset"
   igwBaseURL: "http://IGW_HOST:80"
 
-  gcpPubSub:
+  redis:
     enabled: true
-    projectId: "PROJECT_ID"
-    resultTopicId: "projects/PROJECT_ID/topics/results"
-    topicsConfig:
+    # Connection URL for the request queues + result list. The chart renders a
+    # Secret and injects it as REDIS_URL.
+    url: "redis://redis.NAMESPACE.svc.cluster.local:6379"
+    # Result list; consume client-side with `redis-cli LPOP results-list`.
+    resultQueueName: "results-list"
+    pollIntervalMs: 500
+    batchSize: 10
+    queuesConfig:
       # premium: highest priority via 16 workers, always-open (no quota gate).
-      - subscriber_id: "projects/PROJECT_ID/subscriptions/team-premium-requests-sub"
+      - queue_name: "team-premium-requests"
         worker_pool_id: "premium"
         inference_objective: "latency"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
 
       # standard: per-team concurrency quota of 20.
-      - subscriber_id: "projects/PROJECT_ID/subscriptions/team-standard-requests-sub"
+      - queue_name: "team-standard-requests"
         worker_pool_id: "standard"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
         gate_type: "redis-quota"
         gate_params:
-          address: "redis-quota.NAMESPACE.svc.cluster.local:6379"
+          address: "redis.NAMESPACE.svc.cluster.local:6379"
           attribute: "team"
           mode: "concurrency"
           limit: "20"
           prefix: "quota:"
 
-      # batch: low priority, tight concurrency quota of 5.
-      - subscriber_id: "projects/PROJECT_ID/subscriptions/team-batch-requests-sub"
+      # batch: low priority, tight concurrency quota.
+      - queue_name: "team-batch-requests"
         worker_pool_id: "batch"
         inference_objective: "throughput"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
         gate_type: "redis-quota"
         gate_params:
-          address: "redis-quota.NAMESPACE.svc.cluster.local:6379"
+          address: "redis.NAMESPACE.svc.cluster.local:6379"
           attribute: "team"
           mode: "concurrency"
           # Quota must be BELOW the pool's worker count (4) to be the binding
@@ -77,7 +86,7 @@ ap:
       cpu: "1"
       memory: "1Gi"
 
-  # Phase 1: no Prometheus/Grafana wiring (avoids missing CRDs on the GMP cluster).
+  # Phase 1: no Prometheus/Grafana wiring.
   metrics:
     enabled: true
   podMonitor:

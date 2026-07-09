@@ -2,6 +2,9 @@
 # Provision the GCP Pub/Sub topics, subscriptions, and a service account for the
 # multi-tenant async-processor demo.
 #
+# For the GCP Pub/Sub backend only. The Redis SortedSet backend needs no cloud
+# resources — its queues are sorted-set keys created on first publish.
+#
 # Usage:
 #   PROJECT_ID=my-project ./scripts/gcp-setup.sh
 #   ./scripts/gcp-setup.sh my-project

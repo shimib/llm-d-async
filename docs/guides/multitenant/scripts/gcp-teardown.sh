@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tear down the GCP resources created by gcp-setup.sh.
+# Tear down the GCP resources created by gcp-setup.sh (GCP Pub/Sub backend only).
 #
 # Usage:
 #   PROJECT_ID=my-project ./scripts/gcp-teardown.sh           # topics + subscriptions

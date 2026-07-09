@@ -1,0 +1,91 @@
+# Values for the multi-tenant Pub/Sub demo — QUOTA-ONLY phase (Scenarios A + B).
+#
+# Replace the placeholders for your environment: PROJECT_ID, NAMESPACE,
+# IGW_HOST (inference gateway host), and the InferencePool / model to match your
+# own deployment (example here: vllm-llama3-8b-instruct / meta-llama/Llama-3.1-8B-Instruct).
+#
+# This phase drops the prometheus-saturation gates (cluster uses Google Managed
+# Prometheus; no in-cluster PromQL endpoint yet) and observability extras
+# (no Grafana / prometheus-operator CRDs). Per-team priority here is expressed
+# via worker-pool size; quota via the redis-quota gate. Scenarios A + B.
+ap:
+  image:
+    # Pin the v0.7.2 release. We set the tag explicitly because an extracted
+    # (in-repo) chart still has appVersion 0.7.0, so the tag="" default would
+    # not resolve to a published image. (The *published* OCI chart for 0.7.1
+    # resolves tag="" correctly via the release script — see #281.)
+    repository: ghcr.io/llm-d-incubation/llm-d-async
+    tag: "v0.7.2"
+
+  messageQueueImpl: "gcp-pubsub-gated"
+  igwBaseURL: "http://IGW_HOST:80"
+
+  gcpPubSub:
+    enabled: true
+    projectId: "PROJECT_ID"
+    resultTopicId: "projects/PROJECT_ID/topics/results"
+    topicsConfig:
+      # premium: highest priority via 16 workers, always-open (no quota gate).
+      - subscriber_id: "projects/PROJECT_ID/subscriptions/team-premium-requests-sub"
+        worker_pool_id: "premium"
+        inference_objective: "latency"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+
+      # standard: per-team concurrency quota of 20.
+      - subscriber_id: "projects/PROJECT_ID/subscriptions/team-standard-requests-sub"
+        worker_pool_id: "standard"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        gate_type: "redis-quota"
+        gate_params:
+          address: "redis.NAMESPACE.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          limit: "20"
+          prefix: "quota:"
+
+      # batch: low priority, tight concurrency quota of 5.
+      - subscriber_id: "projects/PROJECT_ID/subscriptions/team-batch-requests-sub"
+        worker_pool_id: "batch"
+        inference_objective: "throughput"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        gate_type: "redis-quota"
+        gate_params:
+          address: "redis.NAMESPACE.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          # Quota must be BELOW the pool's worker count (4) to be the binding
+          # limit in a single replica — otherwise workers cap concurrency first.
+          limit: "2"
+          prefix: "quota:"
+
+  workerPools:
+    - id: "premium"
+      workers: 16
+    - id: "standard"
+      workers: 8
+    - id: "batch"
+      workers: 4
+
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+  # Phase 1: no Prometheus/Grafana wiring (avoids missing CRDs on the GMP cluster).
+  metrics:
+    enabled: true
+  podMonitor:
+    enabled: false
+  modelServerMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+  grafana:
+    dashboards:
+      enabled: false
