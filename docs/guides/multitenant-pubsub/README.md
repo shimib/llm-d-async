@@ -160,6 +160,11 @@ for t in premium standard batch; do publish "$t" 10 & done; wait
 ```
 Each team shows requests = successful in the per-team metrics; results land on `results-sub`.
 
+> Each result is a JSON object with `id`, `payload` (the upstream response body), and `status_code`
+> (the upstream HTTP status). Non-HTTP failures (e.g. a gate drop or deadline) carry `status_code: 0`
+> plus `error_code`/`error_message` (e.g. `GATE_DROPPED`, `DEADLINE_EXCEEDED`). Consumers should
+> branch on `status_code > 0` (an HTTP response was received) vs. `error_code` (non-HTTP failure).
+
 **B. Quota throttling** — drive `batch` past its concurrency limit (2) with concurrent publishers:
 
 ```bash
