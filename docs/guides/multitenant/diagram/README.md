@@ -1,17 +1,16 @@
 # Animated architecture diagram
 
-A slick, looping diagram of the multi-tenant scenario: messages flow per-team
-through the queue → worker pools → dispatch gates → the inference gateway → vLLM,
-and the loop tells the **priority-under-saturation** story — as vLLM saturates, the
-**batch** gate closes and its backlog grows while **premium** keeps flowing.
+A looping diagram of the **team × tier × model** scenario: **two models**, each
+with its own worker pool and vLLM; within each model, three team/tier lanes flow
+through a per-team **reserved/overflow** quota gate and the **tier-priority** merge
+into that model's pool. The loop tells the **model-isolation + priority** story —
+**model A** saturates, so its pool gate goes to **WAIT** (parks in-memory) while
+**model B keeps flowing**.
 
-> The animation draws the **GCP Pub/Sub** backend and the earlier per-pool model
-> as the example. The **Redis SortedSet** backend behaves identically (per-team
-> sorted-set queues in place of topics/subscriptions, dispatched
-> earliest-deadline-first). The current guide expresses priority via the
-> tier-priority merge policy (reserved/overflow × tier lanes over one shared
-> pool) rather than per-pool sizing — the "batch backs off, premium flows"
-> intuition is unchanged.
+> The queue column is drawn generically (Redis SortedSet queue names shown); the
+> **GCP Pub/Sub** backend is equivalent (topics/subscriptions in place of sorted
+> sets). Canvas is 1300×900; `capture.sh` matches that window size and the 18s
+> `--loop`.
 
 ## Files
 

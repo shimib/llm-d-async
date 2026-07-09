@@ -20,7 +20,7 @@ STEP=$((1000/FPS)); i=0
 for ((t=0; t<LOOP_MS; t+=STEP)); do
   b=$t; [ "$b" -lt 40 ] && b=40
   google-chrome --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
-    --run-all-compositor-stages-before-draw --window-size=1280,760 --force-device-scale-factor=1 \
+    --run-all-compositor-stages-before-draw --window-size=1300,900 --force-device-scale-factor=1 \
     --virtual-time-budget="$b" --screenshot="$FRAMES/$(printf '%04d' "$i").png" "$SRC" >/dev/null 2>&1 || true
   i=$((i+1))
 done

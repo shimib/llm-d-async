@@ -14,7 +14,7 @@ The scenario is the point; the **message queue is a pluggable backend**. It runs
 The gate configuration, worker pools, observability, and the scenario walkthroughs below are
 identical across both; only the queue wiring and how you publish differ.
 
-![Animated architecture: per-team messages flow through quota + saturation gates; under load the batch gate closes and its backlog grows while premium keeps flowing](diagram/architecture.gif)
+![Animated architecture: two models each with their own worker pool and vLLM; within each, three team/tier lanes flow through a reserved/overflow quota gate and the tier-priority merge; model A saturates and its pool parks while model B keeps flowing](diagram/architecture.gif)
 
 > The loop shows the full **team × tier × model** picture: two models (each its own pool + vLLM), and
 > within each, the reserved/overflow × tier lanes of the tier-priority merge policy — a hot model backs
