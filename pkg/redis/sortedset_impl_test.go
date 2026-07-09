@@ -54,20 +54,20 @@ func TestParseQueueConfigs(t *testing.T) {
 					t.Errorf("expected q1, got %s", configs[0].QueueName)
 				}
 				if configs[0].GateParams["address"] != "localhost:6379" {
-					t.Errorf("expected localhost:6379, got %s", configs[0].GateParams["address"])
+					t.Errorf("expected localhost:6379, got %v", configs[0].GateParams["address"])
 				}
 			},
 		},
 		{
-			name:    "numeric gate params coerced to strings",
+			name:    "numeric gate params preserved as native types",
 			input:   `[{"queue_name":"q1","igw_base_url":"http://gw","gate_type":"prometheus-saturation","gate_params":{"threshold":0.7,"pool":"p1"}}]`,
 			wantLen: 1,
 			validate: func(t *testing.T, configs []queueConfig) {
-				if configs[0].GateParams["threshold"] != "0.7" {
-					t.Errorf("expected '0.7', got '%s'", configs[0].GateParams["threshold"])
+				if configs[0].GateParams["threshold"] != 0.7 {
+					t.Errorf("expected 0.7, got '%v'", configs[0].GateParams["threshold"])
 				}
 				if configs[0].GateParams["pool"] != "p1" {
-					t.Errorf("expected 'p1', got '%s'", configs[0].GateParams["pool"])
+					t.Errorf("expected 'p1', got '%v'", configs[0].GateParams["pool"])
 				}
 			},
 		},
@@ -115,77 +115,6 @@ func TestParseQueueConfigs(t *testing.T) {
 			}
 			if tt.validate != nil {
 				tt.validate(t, configs)
-			}
-		})
-	}
-}
-
-func TestStringMapUnmarshal(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected map[string]string
-	}{
-		{
-			name:     "string values",
-			input:    `{"key":"value"}`,
-			expected: map[string]string{"key": "value"},
-		},
-		{
-			name:     "numeric float",
-			input:    `{"threshold":0.7}`,
-			expected: map[string]string{"threshold": "0.7"},
-		},
-		{
-			name:     "integer",
-			input:    `{"limit":5}`,
-			expected: map[string]string{"limit": "5"},
-		},
-		{
-			name:     "boolean",
-			input:    `{"enabled":true}`,
-			expected: map[string]string{"enabled": "true"},
-		},
-		{
-			name:     "mixed types",
-			input:    `{"pool":"p1","threshold":0.8,"limit":100,"active":true}`,
-			expected: map[string]string{"pool": "p1", "threshold": "0.8", "limit": "100", "active": "true"},
-		},
-		{
-			name:     "null becomes empty string",
-			input:    `{"key":null}`,
-			expected: map[string]string{"key": ""},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var m StringMap
-			if err := json.Unmarshal([]byte(tt.input), &m); err != nil {
-				t.Fatalf("unmarshal error: %v", err)
-			}
-			for k, want := range tt.expected {
-				if got := m[k]; got != want {
-					t.Errorf("key %q: expected %q, got %q", k, want, got)
-				}
-			}
-		})
-	}
-}
-
-func TestStringMapRejectsNonScalar(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{"nested object", `{"key":{"nested":"value"}}`},
-		{"array", `{"key":[1,2,3]}`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var m StringMap
-			if err := json.Unmarshal([]byte(tt.input), &m); err == nil {
-				t.Error("expected error for non-scalar value, got nil")
 			}
 		})
 	}
@@ -450,6 +379,74 @@ func TestSortedSetFlow_ResultFIFO(t *testing.T) {
 
 	if msg1.ID != "first" || msg2.ID != "second" {
 		t.Errorf("FIFO order broken: got %s, %s", msg1.ID, msg2.ID)
+	}
+}
+
+func TestSortedSetFlow_ResultStructuredFields(t *testing.T) {
+	s, rdb, ctx, cancel := setupTest(t)
+	defer s.Close()
+	defer rdb.Close() // nolint:errcheck
+	defer cancel()
+
+	queue := "structured-result-queue"
+	flow := &RedisSortedSetFlow{
+		defaultResultQueueName: queue,
+		rdb:                    rdb,
+		resultChannel:          make(chan api.ResultMessage, 4),
+		pollInterval:           50 * time.Millisecond,
+		batchSize:              10,
+		gate:                   noopGate(),
+	}
+
+	messages := []api.ResultMessage{
+		{ID: "success", StatusCode: 201, Payload: `{"id":"new"}`},
+		{ID: "http-err", StatusCode: 502, Payload: `{"error":"bad gateway"}`},
+		{ID: "deadline", Payload: `{"error":"deadline exceeded"}`, ErrorCode: api.ErrCodeDeadlineExceeded, ErrorMessage: "deadline exceeded"},
+		{ID: "gate-drop", Payload: `{"error":"Pool gating dropped request"}`, ErrorCode: api.ErrCodeGateDropped, ErrorMessage: "Pool gating dropped request"},
+	}
+	for _, m := range messages {
+		flow.resultChannel <- m
+	}
+
+	go flow.resultWorker(ctx)
+
+	timeout := time.After(2 * time.Second)
+	for {
+		n, err := rdb.LLen(ctx, queue).Result()
+		if err == nil && n >= int64(len(messages)) {
+			break
+		}
+		select {
+		case <-timeout:
+			t.Fatalf("timeout waiting for %d results to be pushed", len(messages))
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	for _, want := range messages {
+		raw, err := rdb.RPop(ctx, queue).Result()
+		if err != nil {
+			t.Fatalf("RPop error for %s: %v", want.ID, err)
+		}
+		var got api.ResultMessage
+		if err := json.Unmarshal([]byte(raw), &got); err != nil {
+			t.Fatalf("Unmarshal error for %s: %v", want.ID, err)
+		}
+		if got.ID != want.ID {
+			t.Errorf("ID = %q, want %q", got.ID, want.ID)
+		}
+		if got.StatusCode != want.StatusCode {
+			t.Errorf("[%s] StatusCode = %d, want %d", want.ID, got.StatusCode, want.StatusCode)
+		}
+		if got.Payload != want.Payload {
+			t.Errorf("[%s] Payload = %q, want %q", want.ID, got.Payload, want.Payload)
+		}
+		if got.ErrorCode != want.ErrorCode {
+			t.Errorf("[%s] ErrorCode = %q, want %q", want.ID, got.ErrorCode, want.ErrorCode)
+		}
+		if got.ErrorMessage != want.ErrorMessage {
+			t.Errorf("[%s] ErrorMessage = %q, want %q", want.ID, got.ErrorMessage, want.ErrorMessage)
+		}
 	}
 }
 

@@ -134,7 +134,7 @@ func (r *Runner) Run(ctx context.Context) (err error) {
 	poolGates := make(map[string]pipeline.Gate)
 	for poolID, pool := range poolsMap {
 		if pool.GateType != "" {
-			gate, err := gateFactory.CreateGate(pool.GateType, pool.GateParams)
+			gate, err := gateFactory.CreateGate(pipeline.GateConfig{GateType: pool.GateType, GateParams: pool.GateParams})
 			if err != nil {
 				setupLog.Error(err, "Failed to create pool gate", "poolID", poolID, "gateType", pool.GateType)
 				os.Exit(1)
