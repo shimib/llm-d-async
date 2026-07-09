@@ -1,0 +1,57 @@
+# Shared-pool + classifying quota + tier-priority merge policy — the guide's
+# reserved-vs-overflow priority model (docs/guides/multitenant). Two team queues
+# feed ONE pool with a single worker (deterministic dispatch order); the
+# redis-quota gate runs in `classifying` mode (within quota -> reserved, over ->
+# overflow) and the tier-priority merge policy dispatches lanes in strict order.
+ap:
+  imagePullPolicy: Never
+  messageQueueImpl: "redis-sortedset"
+  igwBaseURL: "http://envoy.e2e-integration.svc.cluster.local:8081"
+  concurrency: 1
+  prometheusCacheTTL: "0s"
+  metrics:
+    enabled: true
+    port: 9090
+    secure: false
+  requestMergePolicyConfig:
+    type: "tier-priority"
+    parameters:
+      priority_header: "x-gateway-priority"
+  workerPools:
+    - id: "default"
+      workers: 1          # single worker -> dispatch order == merge-policy lane order
+  redis:
+    enabled: true
+    url: "redis://redis.e2e-integration.svc.cluster.local:6379"
+    resultQueueName: "mt-merge-result-list"
+    pollIntervalMs: 500
+    batchSize: 10
+    queuesConfig:
+      - queue_name: "mt-merge-hi-sortedset"
+        worker_pool_id: "default"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://envoy.e2e-integration.svc.cluster.local:8081"
+        labels:
+          tier: "interactive"
+        gate_type: "redis-quota"
+        gate_params:
+          address: "redis.e2e-integration.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          gating_mode: "classifying"
+          limit: "1"
+      - queue_name: "mt-merge-lo-sortedset"
+        worker_pool_id: "default"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://envoy.e2e-integration.svc.cluster.local:8081"
+        labels:
+          tier: "batch"
+        gate_type: "redis-quota"
+        gate_params:
+          address: "redis.e2e-integration.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          gating_mode: "classifying"
+          limit: "1"
+  modelServerMonitor:
+    enabled: false
