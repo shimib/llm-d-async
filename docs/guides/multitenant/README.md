@@ -15,42 +15,62 @@ identical across both; only the queue wiring and how you publish differ.
 
 ![Animated architecture: per-team messages flow through quota + saturation gates; under load the batch gate closes and its backlog grows while premium keeps flowing](diagram/architecture.gif)
 
-> The loop illustrates the priority-under-saturation story (drawn with the Pub/Sub backend as the
-> example; Redis SortedSet behaves identically, with deadline-ordered queues). Source + regeneration:
-> [`diagram/`](diagram/) (`architecture.html` is the editable animated SVG).
+> The loop illustrates the priority-under-saturation story (drawn with the Pub/Sub backend and the
+> earlier per-pool model; the current guide expresses priority with the tier-priority merge policy —
+> reserved/overflow × tier lanes — over one shared pool, and Redis SortedSet behaves identically).
+> Source + regeneration: [`diagram/`](diagram/) (`architecture.html` is the editable animated SVG).
 
 ## What it shows
 
-| Team / tier | Queue | Workers | Saturation tolerance | Per-team quota | `inference_objective` |
-| :-- | :-- | :-- | :-- | :-- | :-- |
-| **premium** (latency) | `team-premium-requests` | 16 | high (`N=40`) — keeps dispatching under load | none | `latency` |
-| **standard** | `team-standard-requests` | 8 | medium (`N=20`) | concurrency **20** | (default) |
-| **batch** (low prio) | `team-batch-requests` | 4 | low (`N=8`) — backs off first | concurrency **2** | `throughput` |
+Each team has a **tier** and a **reserved quota** (its org-guaranteed capacity). All three teams
+feed **one shared worker pool**, and the [**tier-priority merge policy**](https://github.com/llm-d-incubation/llm-d-async/pull/294)
+orders that pool's requests by two per-request dimensions:
 
-The demo uses **both gate levels** introduced in [#276](https://github.com/llm-d-incubation/llm-d-async/pull/276):
+| Team | Queue | Tier | Reserved quota | `inference_objective` |
+| :-- | :-- | :-- | :-- | :-- |
+| **premium** | `team-premium-requests` | `interactive` (highest) | concurrency **2** | `latency` |
+| **standard** | `team-standard-requests` | `async` | concurrency **2** | (default) |
+| **batch** | `team-batch-requests` | `batch` (lowest) | concurrency **1** | `throughput` |
 
-- **Quota — a queue-level gate** (`redis-quota`, per queue): caps a team's concurrent in-flight
-  requests, keyed on the `team` key in the request **`metadata`** (queue-agnostic — the gate reads
-  the request body, not any Pub/Sub attribute). On refuse it returns the message to the queue
-  (admission control). Set the limit **below** the pool's worker count, or the workers bind first
-  (see Notes).
-- **Priority under load — a pool-level gate** (`wait-on-refuse` wrapping a `prometheus-query`, per
-  worker pool): sets a budget from inference-pool saturation,
-  `D = clamp(1 - sum(vllm:num_requests_running)/N, 0, 1)`. Smaller `N` ⇒ backs off at lower load
-  (premium `N=40`, standard `20`, batch `8`). Because it's a **pool** gate, an over-saturation
-  refuse becomes **`ActionWait`**: the worker **parks in-memory and polls** until capacity opens —
-  no broker churn. So under load batch parks first while premium keeps dispatching.
+- **Reservation classification** — set by the per-team **`redis-quota`** gate in **`classifying`**
+  mode (keyed on the `team` key in the request **`metadata`**, queue-agnostic): requests within a
+  team's quota are `reserved` (its guaranteed lane); requests beyond it are `overflow`. Unlike the
+  default *blocking* mode, overflow is **not** nacked — it is admitted and simply deprioritized.
+- **Tier** — a per-queue `tier` label: `interactive` (premium) > `async` (standard) > `batch`.
 
-> **Queue vs pool gates:** queue gates run at admission (refuse → return to the queue, freeing the
-> worker for other queues); pool gates run inside the worker loop and can `ActionWait` (park
-> in-memory) to regulate capacity shared by a pool. Per-team gates work on **`redis-sortedset`** and
-> **`gcp-pubsub-gated`**; **pool gates require the binary from #276** (pin an image that includes it).
+The merge policy buckets every request into one of **6 strict lanes** by `(classification, tier)`,
+dispatches them in that order, and stamps **`x-gateway-priority`** (0 = highest … 5 = lowest) for the
+inference gateway:
+
+| Lane | `x-gateway-priority` | Who |
+| :-- | :-- | :-- |
+| reserved + interactive | 0 | premium within quota |
+| reserved + async | 1 | standard within quota |
+| reserved + batch | 2 | batch within quota |
+| overflow + interactive | 3 | premium over quota |
+| overflow + async | 4 | standard over quota |
+| overflow + batch | 5 | batch over quota |
+
+So **all reserved traffic drains before any overflow** (org priority), and within each class the tier
+order still holds — overflow is prioritized among itself (interactive over batch). Within a lane the
+policy round-robins across teams and, on Redis SortedSet, dispatches earliest-deadline-first.
+
+**Saturation (Scenario C)** adds a pool-level `wait-on-refuse(prometheus-query)` gate on the shared
+pool: `D = clamp(1 - sum(vllm:num_requests_running)/N, 0, 1)`. On saturation the pool **parks**
+(`ActionWait`, in-memory — no broker churn); as capacity frees, the merge policy drains the highest
+lanes first. (For a *tier-aware* saturation gate that treats lanes differently — wait `reserved`,
+429 `interactive`+`overflow`, refuse `async`/`batch`+`overflow` — see the `tier-priority-admission`
+gate from [#294]; these overlays use the simpler `wait-on-refuse` guard.)
+
+> `x-gateway-priority` carries the **lane index (lower = higher priority)**. Confirm your inference
+> gateway / EPP interprets it that way — the header is how per-team priority reaches the scheduler.
 
 ### Two things to know up front
 
-1. **Quota throttling is return-to-queue + redeliver, not "shed."** Over-quota messages are put back
-   on the queue, so you see in-flight pinned at the limit and the **backlog grow** — not the
-   shed-rate counter (which tracks inference 429s).
+1. **Over-quota is deprioritized, not dropped.** In `classifying` mode, requests beyond a team's
+   reserved quota become `overflow` and are dispatched after all `reserved` traffic (and behind
+   higher tiers), rather than nacked/redelivered. To hard-throttle instead, use the gate's default
+   `blocking` mode (over-quota returns to the queue; backlog grows).
 2. **Two observability options** (pick one):
    - **B — self-hosted Prometheus + Grafana** (any cluster, either queue): uses the chart's bundled
      `PodMonitor` / `PrometheusRule` / Grafana dashboard; real-time. **The path for Redis SortedSet.**
@@ -193,39 +213,45 @@ publish() {                                   # publish <team> [count]
 > **rate/concurrency** load (Scenarios B and C), wrap `publish` in background loops or use your own
 > publisher that sets the same `team` key and body.
 
-## Scenarios A & B — quota
+## Scenarios A & B — reserved vs. overflow
 
-**A. Steady state** — a few requests per team:
+**A. Steady state** — each team within its reserved quota:
 
 ```bash
-for t in premium standard batch; do publish "$t" 10 & done; wait
+for t in premium standard batch; do publish "$t" 1 & done; wait
 ```
 
-Each team shows requests = successful in the per-team metrics. Results are delivered per backend:
+Every request is within its team's quota, so all are classified `reserved` and dispatched in tier
+order (premium→standard→batch), stamped `x-gateway-priority` 0/1/2. Results are delivered per backend:
 
 - **Redis:** an `LPUSH` onto the `results-list` list — `kubectl -n NAMESPACE exec deploy/redis -- redis-cli LRANGE results-list 0 -1` (or `LPOP`).
 - **Pub/Sub:** published to the `results` topic — pull from the `results-sub` subscription.
 
 > Each result is a JSON object with `id`, `payload` (the upstream response body), and `status_code`
-> (the upstream HTTP status). Non-HTTP failures (e.g. a gate drop or deadline) carry `status_code: 0`
-> plus `error_code`/`error_message` (e.g. `GATE_DROPPED`, `DEADLINE_EXCEEDED`). Consumers should
-> branch on `status_code > 0` (an HTTP response was received) vs. `error_code` (non-HTTP failure).
+> (the upstream HTTP status). Non-HTTP failures carry `status_code: 0` plus `error_code`/`error_message`
+> (e.g. `GATE_DROPPED`, `DEADLINE_EXCEEDED`). Consumers branch on `status_code > 0` vs. `error_code`.
 
-**B. Quota throttling** — drive `batch` past its concurrency limit (2) with concurrent publishers:
-
-```bash
-for w in 1 2 3 4; do ( publish batch 100 ) & done   # crude concurrency to build a backlog
-```
-
-`batch` in-flight pins at **2**, its backlog climbs, throughput plateaus; `standard` (limit 20,
-non-binding) runs at full pool capacity. Inspect the quota counter and backlog:
+**B. Overflow deprioritization** — push `batch` well past its reserved quota (1) while `premium`
+stays within its own:
 
 ```bash
-kubectl -n NAMESPACE exec deploy/redis -- redis-cli GET quota:team:batch     # <= 2 (both backends)
-# Redis backend — queue depth:
-kubectl -n NAMESPACE exec deploy/redis -- redis-cli ZCARD team-batch-requests
-# Pub/Sub backend — backlog via the num_undelivered_messages metric (see dashboards)
+publish batch 100 &      # far exceeds batch's reserved 1 -> the excess becomes overflow (lane 5)
+publish premium 20 &     # premium within/near its reserved 2 -> reserved (lane 0)
+wait
 ```
+
+batch's first concurrent request stays `reserved` (lane 2); the rest are `overflow` (lane 5) and are
+dispatched only **after** all reserved traffic and all higher-tier overflow. premium's `reserved`
+requests (lane 0) always jump ahead — so premium drains promptly while batch's overflow trails. The
+quota counter caps at the reserved limit; the excess flows as overflow (not nacked):
+
+```bash
+kubectl -n NAMESPACE exec deploy/redis -- redis-cli GET quota:team:batch   # batch's live reserved count (<= 1)
+```
+
+Because this is `classifying` mode, the backlog does **not** grow the way *blocking* mode's does —
+overflow is admitted and simply ordered last, and the stamped `x-gateway-priority` conveys each lane
+to the gateway. (Set `gate_params.gating_mode: blocking` to hard-throttle and grow a backlog instead.)
 
 ## Scenario C — priority under saturation
 
@@ -243,9 +269,10 @@ drive sustained, long-running load on all teams.
   ```
 - **Pub/Sub, option B (self-hosted):** use `values/pubsub/saturation-prometheus.yaml` after option B setup.
 
-As saturation rises, batch's pool-gate budget → 0 first: its workers **park in-memory (`ActionWait`)**
-rather than returning messages, so batch's in-flight drops while premium keeps dispatching. Unlike
-the queue-level quota (Scenario B), this does **not** churn the backlog. Query a per-team budget:
+As saturation rises, the shared pool's budget → 0 and its workers **park in-memory (`ActionWait`)**
+rather than returning messages — so the pool stops pulling new work without churning the backlog. As
+capacity frees, the tier-priority merge policy drains the highest lanes first: `reserved`+`interactive`
+(premium) ahead of everything, `overflow`+`batch` last. Query the pool budget:
 
 ```bash
 # self-hosted Prometheus (real-time):
@@ -253,7 +280,7 @@ kubectl port-forward -n monitoring svc/kps-kube-prometheus-stack-prometheus 9090
 # GMP frontend (Pub/Sub option A):
 # kubectl port-forward -n NAMESPACE deploy/gmp-frontend 9090:9090 &
 curl -s localhost:9090/api/v1/query --data-urlencode \
-  'query=clamp(1 - sum(vllm:num_requests_running)/8, 0, 1)'   # batch budget
+  'query=clamp(1 - sum(vllm:num_requests_running)/20, 0, 1)'   # shared-pool budget
 ```
 
 (With GMP, Monarch lags real time ~1–2 min, so control is bang-bang on that timescale; the
@@ -281,9 +308,11 @@ helm upgrade async-processor ../../../charts/async-processor \
 ```
 
 Open Grafana (`admin`/`admin` in the demo values) and run the Scenario-C load; the **Async Processor**
-dashboard's per-team panels update live (`async_dispatch_budget`, `async_inflight_requests`,
-`async_gate_decisions_total`, and `async_broker_backlog{queue_name,pool_name}` — the portable backlog
-gauge, sourced from `ZCARD` on Redis and Cloud Monitoring on Pub/Sub). Verify scraping / budgets:
+dashboard shows `async_dispatch_budget`, `async_inflight_requests`, `async_gate_decisions_total`, and
+`async_broker_backlog{queue_name,pool_name}` (the portable backlog gauge, from `ZCARD` on Redis and
+Cloud Monitoring on Pub/Sub). Because all teams now share one pool, break the per-team panels down by
+**`queue_name`** (`team-*-requests`) rather than `pool_name` (a single `default` pool). Verify
+scraping / budgets:
 
 ```bash
 kubectl port-forward -n monitoring svc/kps-kube-prometheus-stack-prometheus 9090:9090 &
@@ -303,8 +332,10 @@ gcloud monitoring dashboards create --project $PROJECT_ID \
 ```
 
 The `PodMonitoring` (GMP managed collection) ingests `llm_d_async_async_*`; the dashboard charts
-per-team request/success rate, in-flight (quota effect), and p95 latency, plus **Pub/Sub backlog per
-team** from the native `pubsub.googleapis.com/subscription/num_undelivered_messages` metric.
+request/success rate, in-flight, and p95 latency, plus **Pub/Sub backlog per team** from the native
+`pubsub.googleapis.com/subscription/num_undelivered_messages` metric. Note: `dashboards/cloud-monitoring.json`
+groups by `pool_name`, which is now the single shared pool — regroup those panels by `queue_name` for
+a per-team breakdown.
 **Required:** the collector identity needs `roles/monitoring.metricWriter`. The gate-metric panels
 (`async_dispatch_budget`, `async_gate_decisions_total`, worker utilization — #290/#291) need an image
 **newer than v0.7.2**; on v0.7.2 those panels show no data. (For the Redis backend, use option B — its
@@ -315,8 +346,11 @@ Grafana dashboard covers the same signals, with `async_broker_backlog` in place 
 - **Image pin.** Pin a published release tag (e.g. `v0.7.2`) under
   `ghcr.io/llm-d-incubation/llm-d-async`. The in-repo chart's appVersion may lag the published image
   tag, so an explicit pin avoids an ImagePullBackOff.
-- **Quota must be below the pool's worker count** to be the binding limit in a single replica
-  (batch quota 2 < 4 workers). Otherwise workers cap concurrency and the quota never triggers.
+- **Reserved quota vs. pool size.** Each team's quota is its *reserved* capacity (priority lane) in
+  `classifying` mode, not a hard cap — over-quota flows as `overflow`. Keep the **sum** of reserved
+  quotas at or below the shared pool's worker count, so reserved traffic is never itself
+  capacity-starved and overflow has room to run after it. (In `blocking` mode the quota *is* a hard
+  cap, and must be below the worker count to bind — as in the classic single-pool setup.)
 - **Config-only Helm changes need a pod restart.** Changing the queue config / quota updates the
   processor's config, but it's read once at startup — `kubectl rollout restart` afterwards.
 - **`prometheus-saturation` gate** is hard-wired to the EPP metric

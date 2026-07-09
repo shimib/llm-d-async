@@ -5,9 +5,13 @@ through the queue → worker pools → dispatch gates → the inference gateway 
 and the loop tells the **priority-under-saturation** story — as vLLM saturates, the
 **batch** gate closes and its backlog grows while **premium** keeps flowing.
 
-> The animation draws the **GCP Pub/Sub** backend as the example. The **Redis
-> SortedSet** backend behaves identically (per-team sorted-set queues in place of
-> topics/subscriptions, dispatched earliest-deadline-first).
+> The animation draws the **GCP Pub/Sub** backend and the earlier per-pool model
+> as the example. The **Redis SortedSet** backend behaves identically (per-team
+> sorted-set queues in place of topics/subscriptions, dispatched
+> earliest-deadline-first). The current guide expresses priority via the
+> tier-priority merge policy (reserved/overflow × tier lanes over one shared
+> pool) rather than per-pool sizing — the "batch backs off, premium flows"
+> intuition is unchanged.
 
 ## Files
 

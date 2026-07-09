@@ -1,18 +1,23 @@
-# Values for the multi-tenant scenario — QUOTA-ONLY phase (Scenarios A + B),
-# Redis SortedSet queue backend.
+# Values for the multi-tenant scenario — RESERVED-vs-OVERFLOW priority (Scenarios
+# A + B), Redis SortedSet queue backend.
 #
 # Replace the placeholders for your environment: NAMESPACE, IGW_HOST (inference
 # gateway host), and the InferencePool / model to match your own deployment
 # (example here: vllm-llama3-8b-instruct / meta-llama/Llama-3.1-8B-Instruct).
 #
-# Per-team priority here is expressed via worker-pool size; quota via the
-# redis-quota gate. No pool-saturation gates and no Grafana/prometheus-operator
-# CRDs in this phase. Scenarios A + B.
+# Priority model (via the tier-priority merge policy, #294):
+#   - Each team has a per-team `tier` (premium=interactive, standard=async,
+#     batch=batch) and a reserved concurrency quota (its org-guaranteed lane).
+#   - The redis-quota gate runs in `classifying` mode: within quota -> reserved,
+#     over quota -> overflow (still dispatched, NOT nacked).
+#   - All teams feed ONE shared pool; the tier-priority merge policy dispatches
+#     the 6 (classification x tier) lanes in strict order — all reserved first
+#     (interactive>async>batch), then all overflow (interactive>async>batch) —
+#     and stamps x-gateway-priority (0=highest .. 5=lowest) for the gateway.
 #
-# Note: Redis SortedSet scores each queue by the request `deadline`, so within a
-# team the processor dispatches earliest-deadline-first (Pub/Sub has no such
-# ordering). The same Redis instance (manifests/redis.yaml) backs both the
-# per-team request queues and the redis-quota counters.
+# The same Redis instance (manifests/redis.yaml) backs the per-team request
+# queues and the redis-quota counters; queues are deadline-scored, so within a
+# lane dispatch is earliest-deadline-first.
 ap:
   image:
     # Pin the v0.7.2 release. We set the tag explicitly because an extracted
@@ -24,6 +29,13 @@ ap:
   messageQueueImpl: "redis-sortedset"
   igwBaseURL: "http://IGW_HOST:80"
 
+  # Order the shared pool's requests into (classification x tier) priority lanes
+  # and stamp the priority header for the inference gateway.
+  requestMergePolicyConfig:
+    type: "tier-priority"
+    parameters:
+      priority_header: "x-gateway-priority"
+
   redis:
     enabled: true
     # Connection URL for the request queues + result list. The chart renders a
@@ -34,49 +46,63 @@ ap:
     pollIntervalMs: 500
     batchSize: 10
     queuesConfig:
-      # premium: highest priority via 16 workers, always-open (no quota gate).
+      # premium: interactive tier, reserved quota 2. All queues share the
+      # "default" pool so the merge policy can order across teams.
       - queue_name: "team-premium-requests"
-        worker_pool_id: "premium"
+        worker_pool_id: "default"
         inference_objective: "latency"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
-
-      # standard: per-team concurrency quota of 20.
-      - queue_name: "team-standard-requests"
-        worker_pool_id: "standard"
-        request_path_url: "/v1/completions"
-        igw_base_url: "http://IGW_HOST:80"
+        labels:
+          tier: "interactive"
         gate_type: "redis-quota"
         gate_params:
           address: "redis.NAMESPACE.svc.cluster.local:6379"
           attribute: "team"
           mode: "concurrency"
-          limit: "20"
+          gating_mode: "classifying"   # over-quota -> overflow (dispatched), not nacked
+          limit: "2"                   # premium's reserved capacity
           prefix: "quota:"
 
-      # batch: low priority, tight concurrency quota.
+      # standard: async tier, reserved quota 2.
+      - queue_name: "team-standard-requests"
+        worker_pool_id: "default"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        labels:
+          tier: "async"
+        gate_type: "redis-quota"
+        gate_params:
+          address: "redis.NAMESPACE.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          gating_mode: "classifying"
+          limit: "2"                   # standard's reserved capacity
+          prefix: "quota:"
+
+      # batch: batch tier, tight reserved quota 1 — its excess becomes overflow
+      # (lowest lane) and drains only after everyone's reserved traffic.
       - queue_name: "team-batch-requests"
-        worker_pool_id: "batch"
+        worker_pool_id: "default"
         inference_objective: "throughput"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
+        labels:
+          tier: "batch"
         gate_type: "redis-quota"
         gate_params:
           address: "redis.NAMESPACE.svc.cluster.local:6379"
           attribute: "team"
           mode: "concurrency"
-          # Quota must be BELOW the pool's worker count (4) to be the binding
-          # limit in a single replica — otherwise workers cap concurrency first.
-          limit: "2"
+          gating_mode: "classifying"
+          limit: "1"                   # batch's reserved capacity
           prefix: "quota:"
 
+  # One shared pool sized above the sum of reserved quotas, so overflow traffic
+  # is admitted and dispatched (after reserved) rather than starved.
   workerPools:
-    - id: "premium"
-      workers: 16
-    - id: "standard"
+    - id: "default"
       workers: 8
-    - id: "batch"
-      workers: 4
 
   resources:
     requests:
