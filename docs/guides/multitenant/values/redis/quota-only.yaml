@@ -1,36 +1,34 @@
-# Values for the multi-tenant scenario — RESERVED-vs-OVERFLOW priority (Scenarios
-# A + B), Redis SortedSet queue backend.
+# Values for the multi-tenant scenario — team × tier × MODEL (Scenarios A + B),
+# Redis SortedSet queue backend.
 #
-# Replace the placeholders for your environment: NAMESPACE, IGW_HOST (inference
-# gateway host), and the InferencePool / model to match your own deployment
-# (example here: vllm-llama3-8b-instruct / meta-llama/Llama-3.1-8B-Instruct).
+# Replace the placeholders: NAMESPACE, IGW_HOST (one inference gateway that routes
+# by payload.model to two InferencePools), MODEL_A / MODEL_B (the two served model
+# names), POOL_A / POOL_B (their InferencePool names — used by the saturation
+# overlay).
 #
-# Priority model (via the tier-priority merge policy, #294):
-#   - Each team has a per-team `tier` (premium=interactive, standard=async,
-#     batch=batch) and a reserved concurrency quota (its org-guaranteed lane).
-#   - The redis-quota gate runs in `classifying` mode: within quota -> reserved,
-#     over quota -> overflow (still dispatched, NOT nacked).
-#   - All teams feed ONE shared pool; the tier-priority merge policy dispatches
-#     the 6 (classification x tier) lanes in strict order — all reserved first
-#     (interactive>async>batch), then all overflow (interactive>async>batch) —
-#     and stamps x-gateway-priority (0=highest .. 5=lowest) for the gateway.
+# Three dimensions:
+#   - MODEL  -> its own worker pool (model-a / model-b): independent concurrency
+#     and (in the saturation overlay) independent saturation back-off. 6 queues =
+#     3 teams × 2 models; the publisher sends model-a traffic to the *-a queues
+#     (payload.model = MODEL_A) and model-b traffic to the *-b queues.
+#   - TEAM   -> a per-(team, model) reserved quota via redis-quota in `classifying`
+#     mode: within quota -> reserved, over quota -> overflow (dispatched, not
+#     nacked). Per-model `prefix` (quota:a: / quota:b:) keeps the counters separate.
+#   - TIER   -> a per-queue `tier` label (premium=interactive, standard=async,
+#     batch=batch).
 #
-# The same Redis instance (manifests/redis.yaml) backs the per-team request
-# queues and the redis-quota counters; queues are deadline-scored, so within a
-# lane dispatch is earliest-deadline-first.
+# The tier-priority merge policy runs per pool independently: within each model it
+# dispatches the 6 (classification × tier) lanes in strict order (all reserved
+# before any overflow; interactive>async>batch within each) and stamps
+# x-gateway-priority. Results land on a per-model list (results-a-list / -b-list).
 ap:
   image:
-    # Pin the v0.7.2 release. We set the tag explicitly because an extracted
-    # (in-repo) chart still has appVersion 0.7.0, so the tag="" default would
-    # not resolve to a published image.
     repository: ghcr.io/llm-d-incubation/llm-d-async
     tag: "v0.7.2"
 
   messageQueueImpl: "redis-sortedset"
   igwBaseURL: "http://IGW_HOST:80"
 
-  # Order the shared pool's requests into (classification x tier) priority lanes
-  # and stamp the priority header for the inference gateway.
   requestMergePolicyConfig:
     type: "tier-priority"
     parameters:
@@ -38,21 +36,18 @@ ap:
 
   redis:
     enabled: true
-    # Connection URL for the request queues + result list. The chart renders a
-    # Secret and injects it as REDIS_URL.
     url: "redis://redis.NAMESPACE.svc.cluster.local:6379"
-    # Result list; consume client-side with `redis-cli LPOP results-list`.
-    resultQueueName: "results-list"
+    resultQueueName: "results-a-list"   # default; per-queue result_queue_name overrides below
     pollIntervalMs: 500
     batchSize: 10
     queuesConfig:
-      # premium: interactive tier, reserved quota 2. All queues share the
-      # "default" pool so the merge policy can order across teams.
-      - queue_name: "team-premium-requests"
-        worker_pool_id: "default"
+      # ---------- MODEL A (pool model-a, payload.model = MODEL_A) ----------
+      - queue_name: "team-premium-a"
+        worker_pool_id: "model-a"
         inference_objective: "latency"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
+        result_queue_name: "results-a-list"
         labels:
           tier: "interactive"
         gate_type: "redis-quota"
@@ -60,15 +55,14 @@ ap:
           address: "redis.NAMESPACE.svc.cluster.local:6379"
           attribute: "team"
           mode: "concurrency"
-          gating_mode: "classifying"   # over-quota -> overflow (dispatched), not nacked
-          limit: "2"                   # premium's reserved capacity
-          prefix: "quota:"
-
-      # standard: async tier, reserved quota 2.
-      - queue_name: "team-standard-requests"
-        worker_pool_id: "default"
+          gating_mode: "classifying"
+          limit: "2"
+          prefix: "quota:a:"
+      - queue_name: "team-standard-a"
+        worker_pool_id: "model-a"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
+        result_queue_name: "results-a-list"
         labels:
           tier: "async"
         gate_type: "redis-quota"
@@ -77,16 +71,14 @@ ap:
           attribute: "team"
           mode: "concurrency"
           gating_mode: "classifying"
-          limit: "2"                   # standard's reserved capacity
-          prefix: "quota:"
-
-      # batch: batch tier, tight reserved quota 1 — its excess becomes overflow
-      # (lowest lane) and drains only after everyone's reserved traffic.
-      - queue_name: "team-batch-requests"
-        worker_pool_id: "default"
+          limit: "2"
+          prefix: "quota:a:"
+      - queue_name: "team-batch-a"
+        worker_pool_id: "model-a"
         inference_objective: "throughput"
         request_path_url: "/v1/completions"
         igw_base_url: "http://IGW_HOST:80"
+        result_queue_name: "results-a-list"
         labels:
           tier: "batch"
         gate_type: "redis-quota"
@@ -95,13 +87,64 @@ ap:
           attribute: "team"
           mode: "concurrency"
           gating_mode: "classifying"
-          limit: "1"                   # batch's reserved capacity
-          prefix: "quota:"
+          limit: "1"
+          prefix: "quota:a:"
 
-  # One shared pool sized above the sum of reserved quotas, so overflow traffic
-  # is admitted and dispatched (after reserved) rather than starved.
+      # ---------- MODEL B (pool model-b, payload.model = MODEL_B) ----------
+      - queue_name: "team-premium-b"
+        worker_pool_id: "model-b"
+        inference_objective: "latency"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        result_queue_name: "results-b-list"
+        labels:
+          tier: "interactive"
+        gate_type: "redis-quota"
+        gate_params:
+          address: "redis.NAMESPACE.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          gating_mode: "classifying"
+          limit: "2"
+          prefix: "quota:b:"
+      - queue_name: "team-standard-b"
+        worker_pool_id: "model-b"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        result_queue_name: "results-b-list"
+        labels:
+          tier: "async"
+        gate_type: "redis-quota"
+        gate_params:
+          address: "redis.NAMESPACE.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          gating_mode: "classifying"
+          limit: "2"
+          prefix: "quota:b:"
+      - queue_name: "team-batch-b"
+        worker_pool_id: "model-b"
+        inference_objective: "throughput"
+        request_path_url: "/v1/completions"
+        igw_base_url: "http://IGW_HOST:80"
+        result_queue_name: "results-b-list"
+        labels:
+          tier: "batch"
+        gate_type: "redis-quota"
+        gate_params:
+          address: "redis.NAMESPACE.svc.cluster.local:6379"
+          attribute: "team"
+          mode: "concurrency"
+          gating_mode: "classifying"
+          limit: "1"
+          prefix: "quota:b:"
+
+  # One pool per model — independent concurrency (and, in the saturation overlay,
+  # independent saturation back-off).
   workerPools:
-    - id: "default"
+    - id: "model-a"
+      workers: 8
+    - id: "model-b"
       workers: 8
 
   resources:
@@ -112,7 +155,6 @@ ap:
       cpu: "1"
       memory: "1Gi"
 
-  # Phase 1: no Prometheus/Grafana wiring.
   metrics:
     enabled: true
   podMonitor:

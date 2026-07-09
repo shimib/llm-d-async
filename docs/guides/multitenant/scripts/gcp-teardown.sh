@@ -12,18 +12,23 @@ PROJECT_ID="${PROJECT_ID:-${1:-}}"
 SA_NAME="${SA_NAME:-async-processor}"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 TEAMS=(premium standard batch)
+MODELS=(a b)
 
 echo ">> Deleting subscriptions"
 for t in "${TEAMS[@]}"; do
-  gcloud pubsub subscriptions delete "team-${t}-requests-sub" --project "$PROJECT_ID" --quiet 2>/dev/null \
-    && echo "  deleted team-${t}-requests-sub" || true
+  for m in "${MODELS[@]}"; do
+    gcloud pubsub subscriptions delete "team-${t}-${m}-requests-sub" --project "$PROJECT_ID" --quiet 2>/dev/null \
+      && echo "  deleted team-${t}-${m}-requests-sub" || true
+  done
 done
 gcloud pubsub subscriptions delete "results-sub" --project "$PROJECT_ID" --quiet 2>/dev/null || true
 
 echo ">> Deleting topics"
 for t in "${TEAMS[@]}"; do
-  gcloud pubsub topics delete "team-${t}-requests" --project "$PROJECT_ID" --quiet 2>/dev/null \
-    && echo "  deleted team-${t}-requests" || true
+  for m in "${MODELS[@]}"; do
+    gcloud pubsub topics delete "team-${t}-${m}-requests" --project "$PROJECT_ID" --quiet 2>/dev/null \
+      && echo "  deleted team-${t}-${m}-requests" || true
+  done
 done
 gcloud pubsub topics delete "results" --project "$PROJECT_ID" --quiet 2>/dev/null || true
 
