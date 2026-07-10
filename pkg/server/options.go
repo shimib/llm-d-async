@@ -80,7 +80,7 @@ func NewOptions() *Options {
 				MetricsEndpointAuth: true,
 			},
 			Worker: WorkerConfig{
-				Concurrency:    8,
+				Concurrency:    64,
 				RequestTimeout: 5 * time.Minute,
 				DrainTimeout:   2 * time.Minute,
 			},

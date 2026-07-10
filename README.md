@@ -85,7 +85,7 @@ make deploy-ap-on-k8s
      ```
 
 ## Command line parameters
-- `concurrency`: The number of concurrent workers (per pool if unspecified), default is 8.
+- `concurrency`: The number of concurrent workers (per pool if unspecified), default is 64. The processor is I/O-bound (each worker holds one in-flight request for its full duration), so by Little's Law in-flight concurrency caps throughput — tune this to your backend's latency/throughput target (see the [Async Processor Operations Guide](https://github.com/llm-d/llm-d/blob/main/docs/operations/async-processor.md)).
 - `request-merge-policy-config`: Path to the JSON configuration file containing the request merge policy specification (`type` and `parameters`). If not specified, defaults to the `random-robin` policy.
 - `message-queue-impl`: Implementation of the queueing system. Options are <u>gcp-pubsub</u> for GCP PubSub, <u>gcp-pubsub-gated</u> for GCP PubSub with per-topic gating, <u>redis-sortedset</u> for Redis Sorted Set (persisted and sorted), and <u>redis-pubsub</u> for ephemeral Redis-based implementation.
 - `pool-config-file`: Path to the JSON configuration file containing the worker pool definitions. If omitted, a single `"default"` worker pool is created with concurrency determined by the global `concurrency` flag.

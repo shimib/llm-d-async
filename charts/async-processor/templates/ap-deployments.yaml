@@ -120,7 +120,7 @@ spec:
           {{- if .Values.ap.requestMergePolicyConfig }}
           - --request-merge-policy-config=/etc/async-processor/config/request-merge-policy.json
           {{- end }}
-          - --concurrency={{ .Values.ap.concurrency | default 8 }}
+          - --concurrency={{ .Values.ap.concurrency | default 64 }}
           - --drain-timeout={{ .Values.ap.drainTimeout | default "2m" }}
           - --health-port={{ .Values.ap.health.port | default 8081 }}
           - --metrics-endpoint-auth={{ .Values.ap.metrics.secure }}
