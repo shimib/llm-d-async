@@ -14,6 +14,7 @@ the rare ones load tests never hit (concurrent admits, pod crashes mid-flight).
 | [`GateCancelGen.tla`](GateCancelGen.tla) | PR [#307](https://github.com/llm-d-incubation/llm-d-async/pull/307): generation-aware cancellation — a reused request id, a per-submission token, and the `request-active` / `request-cancel` keys under concurrent submit / cancel / deferred cleanup | **token-guarded design (#307): all hold.** The id-only design violates both `NoSpuriousCancel` and `NoLostCancel` (an ABA where a stale generation's cleanup clobbers a newer one's keys). |
 | [`MergePriority.tla`](MergePriority.tla) | PR [#294](https://github.com/llm-d-incubation/llm-d-async/pull/294): the tier-priority merge policy's strict-priority `Pop()` under sustained high-priority load | **current design: `NoStarvation` violated** — TLC finds a fair lasso where a low-priority lane is never served. A starvation-free policy (flip one constant) holds. |
 | [`ResultCorrelation.tla`](ResultCorrelation.tla) | issue [#308](https://github.com/llm-d-incubation/llm-d-async/issues/308): the producer's `GetResult` doing `BRPOP` on one **shared** result list with N concurrent callers | **current design: `EachCallerGetsOwnResult` violated** — a caller pops another caller's result. The per-request result queue (flip one constant) holds. |
+| [`GateReservationLeak.tla`](GateReservationLeak.tla) | the per-queue gate capacity reservation: acquired on `ActionContinue`, released **only** on a `ResultMessage`, but every retry re-enqueues without releasing (`activeReleases.Store` also overwrites) | **current code: `AccountingExact` and `EventuallyServed` both violated** — leaked slots ratchet `inFlight` up until `Budget()=0` wedges the queue. Releasing on retry (flip one constant) holds. |
 
 ## Why this gate
 
@@ -244,6 +245,53 @@ This formalizes the correlation limitation behind #308: a synchronous OpenAI-sty
 gateway sitting in front of the queues needs per-request result routing, not the
 shared list.
 
+## What the reservation-lifecycle model found (a real, latent bug)
+
+`GateReservationLeak.tla` is, like `MsgLifecycle`, a model written to *probe* the
+current code rather than confirm a known fact — and it found a reachable defect.
+
+The Redis sorted-set flow reserves gate capacity when the queue gate returns
+`ActionContinue` (`LocalConcurrencyGate.inFlight++`, or a redis-quota `INCR`) and
+stores the release closure keyed by request id:
+
+```go
+r.activeReleases.Store(rview.ReqID(), releases)   // sortedset_impl.go:527
+```
+
+That release runs in **exactly one place** — when a `ResultMessage` for the id passes
+through `resultWorker`:
+
+```go
+if val, ok := r.activeReleases.LoadAndDelete(m.ID); ok { ... }   // :648
+```
+
+But **every retry path emits a `RetryMessage` and no result**
+(`worker.go:67,129,169,183,282,427,491`): a retriable inference error, an
+`ActionRefuse`, an `ActionWait` that times out, a cancellation-check error, an
+in-flight ctx cancellation. So a retried request is re-enqueued **without releasing
+its reservation**, and — because `activeReleases.Store` (`:527`) is a plain store — a
+later re-dispatch of the same id **overwrites** the previous closure, orphaning it
+forever. `LocalConcurrencyGate` has no TTL and `Budget()` returns 0 once
+`inFlight >= limit` (`local_concurrency_gate.go:59-61`), which floors `batchSize` to 0
+— so leaked slots wedge the queue permanently.
+
+The `ReleaseOnRetry` constant flips between the current code (retry does not release)
+and the fix (retry releases). Two properties:
+
+- **`AccountingExact`** *(safety)* — `inFlight` equals the number of ids that actually
+  hold a reservation. With `ReleaseOnRetry = FALSE` and `Limit = 2`, TLC finds a
+  4-state trace: dispatch r1 (`inFlight=1`) → retry r1 (`inFlight` still 1, r1 still
+  reserved) → re-dispatch r1 (`inFlight=2`, still only r1 reserved) → `2 ≠ 1`.
+- **`EventuallyServed`** *(liveness)* — every request eventually completes. With
+  `ReleaseOnRetry = FALSE` and `Limit = 1`, TLC finds a lasso: r1 dispatches, retries,
+  and can never be re-dispatched because its own un-released reservation occupies the
+  only slot — r1 (and the whole queue) wedge forever.
+
+With `ReleaseOnRetry = TRUE` both hold. The fix is to release the reservation on the
+retry paths (or `LoadAndDelete` before re-`Store`, or carry the reservation across the
+retry). Unlike the other models here, this one describes a defect in **shipping
+code**, so it should be paired with a regression test, not just a green model.
+
 ## Running TLC
 
 You need Java and `tla2tools.jar`
@@ -306,6 +354,15 @@ java -cp tla2tools.jar pcal.trans ResultCorrelation.tla
 java -cp tla2tools.jar tlc2.TLC -deadlock -config ResultCorrelation_shared.cfg ResultCorrelation.tla
 # per-request result list -> "No error has been found."
 java -cp tla2tools.jar tlc2.TLC -deadlock -config ResultCorrelation_perrequest.cfg ResultCorrelation.tla
+
+# the gate reservation-leak model (a latent bug in shipping code)
+java -cp tla2tools.jar pcal.trans GateReservationLeak.tla
+# current code -> AccountingExact violated (Store overwrite double-counts inFlight)
+java -cp tla2tools.jar tlc2.TLC -deadlock -config GateReservationLeak_buggy.cfg GateReservationLeak.tla
+# current code, liveness -> EventuallyServed violated (retried request wedges the queue)
+java -cp tla2tools.jar tlc2.TLC -deadlock -config GateReservationLeak_buggy_live.cfg GateReservationLeak.tla
+# release-on-retry (the fix) -> "No error has been found."
+java -cp tla2tools.jar tlc2.TLC -deadlock -config GateReservationLeak_fixed.cfg GateReservationLeak.tla
 ```
 
 (A buggy model with two counter-examples uses two configs only because TLC stops at
