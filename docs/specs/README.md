@@ -11,6 +11,9 @@ the rare ones load tests never hit (concurrent admits, pod crashes mid-flight).
 | [`GateQuotaRace.tla`](GateQuotaRace.tla) | the same gate with a **non-atomic** acquire (check-then-increment in two steps) | **NoOverAdmission violated** (TLC prints the trace) |
 | [`MsgLifecycle.tla`](MsgLifecycle.tla) | the Pub/Sub message → dispatch → result → ack flow, where completion is correlated through a process-global map keyed by `msg.ID`, under at-least-once redelivery | **current design: `AckIntegrity` and `NoStuckCallback` both violated.** A corrected design (flip one constant) holds. |
 | [`GateThrottle.tla`](GateThrottle.tla) | issue [#304](https://github.com/llm-d-incubation/llm-d-async/issues/304): a worker-pool gate that makes a **binary** admit decision (`observed < threshold`) across N parallel workers on a **lagging** scrape | **current design: `RespectsThreshold` violated** — TLC finds `inflight = |Workers| > Threshold`. The budget-throttled variant (flip one constant) holds. |
+| [`GateCancelGen.tla`](GateCancelGen.tla) | PR [#307](https://github.com/llm-d-incubation/llm-d-async/pull/307): generation-aware cancellation — a reused request id, a per-submission token, and the `request-active` / `request-cancel` keys under concurrent submit / cancel / deferred cleanup | **token-guarded design (#307): all hold.** The id-only design violates both `NoSpuriousCancel` and `NoLostCancel` (an ABA where a stale generation's cleanup clobbers a newer one's keys). |
+| [`MergePriority.tla`](MergePriority.tla) | PR [#294](https://github.com/llm-d-incubation/llm-d-async/pull/294): the tier-priority merge policy's strict-priority `Pop()` under sustained high-priority load | **current design: `NoStarvation` violated** — TLC finds a fair lasso where a low-priority lane is never served. A starvation-free policy (flip one constant) holds. |
+| [`ResultCorrelation.tla`](ResultCorrelation.tla) | issue [#308](https://github.com/llm-d-incubation/llm-d-async/issues/308): the producer's `GetResult` doing `BRPOP` on one **shared** result list with N concurrent callers | **current design: `EachCallerGetsOwnResult` violated** — a caller pops another caller's result. The per-request result queue (flip one constant) holds. |
 
 ## Why this gate
 
@@ -157,6 +160,90 @@ holds `Threshold` exactly; real scrape lag still leaves the queue path a small,
 *bounded* residual overshoot — the benchmark's 0.8118 — while the pool path's
 overshoot scales with the worker count.)
 
+## What the cancellation model found (PR #307)
+
+`GateCancelGen.tla` models generation-aware cancellation. A request id can be
+submitted more than once — a retry, or an at-least-once redelivery — so one id
+names several *generations*. #307 tells them apart with a per-submission random
+token and two Redis keys, `request-active:<id>` and `request-cancel:<id>`, touched
+by four atomic operations (`producer/redis_sortedset_producer.go`,
+`pkg/redis/sortedset_impl.go`):
+
+- **Submit(g)** — `DEL cancel; SET active := token(g); enqueue` (a `MULTI/EXEC`).
+- **Cancel** — `active := GET active; if active != nil: SET cancel := active`
+  (the `markRequestCancelledScript` — it captures whatever generation is active *now*).
+- **IsCancelled(g)** — `GET cancel == token(g)` (a **token compare**).
+- **Cleanup(g)** — delete `active`/`cancel` **only if they still hold `token(g)`**
+  (the `cleanupRequestStateScript` — a **token-guarded** delete), run on the
+  deferred result-flush path.
+
+The hazard is ABA: cleanup for a *finished* generation runs on the flush path,
+which can land **after** the id has been resubmitted as a newer generation. The
+`TokenGuarded` constant flips between #307 (token compare + guarded delete) and an
+id-only design (a cancel marker just has to *exist*; cleanup deletes
+unconditionally). Two properties:
+
+- **`NoSpuriousCancel`** *(safety)* — a generation is cancelled only if the user
+  targeted *that* generation.
+- **`NoLostCancel`** *(safety)* — a generation cancelled while still queued is never
+  dispatched.
+
+With `TokenGuarded = TRUE`, both hold (plus `NoKeyLeak`, liveness). With
+`TokenGuarded = FALSE`, TLC finds a 7-state ABA trace violating both: gen 1 and
+gen 2 (a resubmission of the same id) are both queued; Cancel targets gen 2 and
+sets the marker; the worker drops **gen 1** on the id-only check (spurious); gen 1's
+unconditional cleanup then **deletes gen 2's cancel marker**; so gen 2 dispatches
+despite being cancelled (lost). The token guard on both `IsCancelled` and `Cleanup`
+is exactly what closes this — the model is the justification for carrying the token
+rather than keying cancellation on the id alone.
+
+The model also pins the scope: it fires Cancel only on the **final** generation.
+A resubmit *after* a cancel legitimately revives the id (Submit's `DEL cancel`), so
+that is not a lost cancel — an earlier draft's property wrongly flagged it, and
+tightening the model to the real guarantee is what made `TokenGuarded = TRUE` clean.
+
+## What the merge-policy model found (PR #294)
+
+`MergePriority.tla` models the tier-priority merge scheduler
+(`pkg/async/mergepolicy/tierpriority/tier_priority_policy.go`). Its `Pop()` scans
+the 6 priority buckets high → low and serves the first non-empty one — **strict**
+priority. Under sustained high-priority load a lower lane is therefore never
+reached. Abstracted to a HIGH bucket under continuous arrivals plus one
+distinguished LOW request, and flipping `StrictPriority`:
+
+- **`NoStarvation`** *(liveness)* — `loArrived ~> loServed`: a buffered low-priority
+  request is eventually served.
+- `TRUE` (current `Pop()`) → TLC finds a **fair lasso**: arrivals keep refilling the
+  HIGH bucket, `Pop()` forever serves HIGH, and the LOW request is never served —
+  `NoStarvation` violated. Weak fairness on the reader does not save it, because
+  serve-low is only intermittently enabled.
+- `FALSE` (any starvation-free policy — aging, weighted, round-robin) → holds.
+
+The same unconditional strict ordering also head-of-line blocks: each input channel
+has a single FIFO reader goroutine that blocks in `Push()` when its target bucket
+is full, so a high-priority message queued behind a low-priority one *on the same
+channel* cannot advance (priority inversion). Both symptoms share the root cause;
+the model checks the starvation half, which is the cleaner liveness statement.
+
+## What the result-correlation model found (issue #308)
+
+`ResultCorrelation.tla` models `GetResult`, which does `BRPOP <resultQueueName>`
+(`producer/redis_sortedset_producer.go:208`) on the producer's **one shared**
+result list. The processor pushes each request's result (tagged with its id) onto
+that same list, so `BRPOP` hands a caller *whatever* result is at the tail — there
+is no caller↔result correlation. Flipping `PerRequestQueue`:
+
+- **`EachCallerGetsOwnResult`** *(safety)* — a caller only ever receives the result
+  for the id it submitted.
+- `FALSE` (one shared list) → TLC finds a 3-state trace where a caller pops another
+  caller's result — violated.
+- `TRUE` (per-request list, via `api.RedisRequest`'s existing `ResultQueueName`
+  override) → holds.
+
+This formalizes the correlation limitation behind #308: a synchronous OpenAI-style
+gateway sitting in front of the queues needs per-request result routing, not the
+shared list.
+
 ## Running TLC
 
 You need Java and `tla2tools.jar`
@@ -195,10 +282,35 @@ java -cp tla2tools.jar pcal.trans GateThrottle.tla
 java -cp tla2tools.jar tlc2.TLC -config GateThrottle_binary.cfg GateThrottle.tla
 # budget-throttled admission (the fix) -> "No error has been found."
 java -cp tla2tools.jar tlc2.TLC -config GateThrottle_proportional.cfg GateThrottle.tla
+
+# the generation-aware cancellation model (PR #307). -deadlock: clean quiescence
+# (everything cancelled/dispatched and cleaned) is the expected end state.
+java -cp tla2tools.jar pcal.trans GateCancelGen.tla
+# #307 token-guarded design -> "No error has been found."
+java -cp tla2tools.jar tlc2.TLC -deadlock -config GateCancelGen_guarded.cfg GateCancelGen.tla
+# id-only design -> NoLostCancel violated (the ABA: stale cleanup drops gen 2's cancel)
+java -cp tla2tools.jar tlc2.TLC -deadlock -config GateCancelGen_naive_lostcancel.cfg GateCancelGen.tla
+# id-only design -> NoSpuriousCancel violated (gen 1 dropped on a marker meant for gen 2)
+java -cp tla2tools.jar tlc2.TLC -deadlock -config GateCancelGen_naive_spurious.cfg GateCancelGen.tla
+
+# the tier-priority merge starvation model (PR #294)
+java -cp tla2tools.jar pcal.trans MergePriority.tla
+# current strict-priority Pop() -> NoStarvation violated (fair lasso; low never served)
+java -cp tla2tools.jar tlc2.TLC -config MergePriority_strict.cfg MergePriority.tla
+# starvation-free policy -> "No error has been found."
+java -cp tla2tools.jar tlc2.TLC -config MergePriority_fair.cfg MergePriority.tla
+
+# the shared-result-queue correlation model (issue #308)
+java -cp tla2tools.jar pcal.trans ResultCorrelation.tla
+# one shared result list -> EachCallerGetsOwnResult violated (caller pops another's result)
+java -cp tla2tools.jar tlc2.TLC -deadlock -config ResultCorrelation_shared.cfg ResultCorrelation.tla
+# per-request result list -> "No error has been found."
+java -cp tla2tools.jar tlc2.TLC -deadlock -config ResultCorrelation_perrequest.cfg ResultCorrelation.tla
 ```
 
-(The buggy run uses two configs only because TLC stops at the first invariant
-violation, so liveness gets its own config with no invariants.)
+(A buggy model with two counter-examples uses two configs only because TLC stops at
+the first invariant violation — e.g. `GateCancelGen` splits `NoLostCancel` and
+`NoSpuriousCancel`, and `MsgLifecycle` gives liveness its own config with no invariants.)
 
 The `.cfg` files fix the model size (workers/tiers/limits). The `\* BEGIN/END
 TRANSLATION` block in each `.tla` is generated by `pcal.trans` from the

@@ -2,3 +2,15 @@
 states/
 *.old
 *.toolbox/
+
+# The model checker itself (download per README).
+tla2tools.jar
+
+# Default per-module .cfg emitted by `pcal.trans` for specs that ship SUFFIXED
+# named .cfg files (e.g. GateCancelGen_guarded.cfg) instead of a bare module cfg.
+# (GateQuota.cfg and GateQuotaRace.cfg are real, committed configs -- not listed.)
+GateThrottle.cfg
+MsgLifecycle.cfg
+GateCancelGen.cfg
+MergePriority.cfg
+ResultCorrelation.cfg
