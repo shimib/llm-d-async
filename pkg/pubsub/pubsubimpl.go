@@ -256,8 +256,14 @@ func (r *PubSubMQFlow) HealthCheck(ctx context.Context) error {
 			lastOK, lastErr, lastErrAt := h.lastOK, h.lastErr, h.lastErrAt
 			h.mu.Unlock()
 
-			// A consume error more recent than the last success is authoritative.
-			if lastErr != nil && lastErrAt.After(lastOK) {
+			// A recent consume error is authoritative proof of trouble. A stale one
+			// is not: the consume loop only refreshes lastOK when a message is
+			// actually delivered, so on a quiet subscription an old error would
+			// otherwise pin the pod not-ready forever even after the broker
+			// recovers. Once the error ages past the TTL, fall through to the
+			// active probe below, which re-confirms reachability and lets an idle
+			// subscription recover readiness.
+			if lastErr != nil && lastErrAt.After(lastOK) && time.Since(lastErrAt) < consumeHealthTTL {
 				return fmt.Errorf("pubsub subscription %q consume loop unhealthy: %w", cd.subscriberID, lastErr)
 			}
 			// A recent success proves connectivity; skip the admin call.

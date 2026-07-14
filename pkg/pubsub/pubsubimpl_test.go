@@ -449,3 +449,30 @@ func TestHealthCheck_ConsumeLoopCache(t *testing.T) {
 		t.Error("expected not-ready from cached consume error, got nil")
 	}
 }
+
+// TestHealthCheck_StaleConsumeErrorRecovers guards the fix for the sticky-error
+// asymmetry: a consume error older than consumeHealthTTL must no longer pin the
+// pod not-ready. Because the consume loop only refreshes lastOK on a delivered
+// message, an idle subscription would otherwise stay unhealthy forever after a
+// transient blip. HealthCheck must fall through to the active probe, which finds
+// the subscription reachable and reports ready.
+func TestHealthCheck_StaleConsumeErrorRecovers(t *testing.T) {
+	client, _ := newFakePubSub(t)
+	createSubscription(t, client, "sub-1")
+
+	flow := &PubSubMQFlow{
+		client:          client,
+		requestChannels: []RequestChannelData{{subscriberID: "sub-1"}},
+		consumeHealth: map[string]*subHealth{"sub-1": {
+			// Error older than the TTL, and no successful receive since.
+			lastErr:   errors.New("transient receive failure"),
+			lastErrAt: time.Now().Add(-2 * consumeHealthTTL),
+		}},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := flow.HealthCheck(ctx); err != nil {
+		t.Errorf("expected stale consume error to fall back to a healthy active probe, got error: %v", err)
+	}
+}
