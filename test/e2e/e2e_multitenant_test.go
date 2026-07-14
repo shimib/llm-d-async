@@ -8,7 +8,7 @@ import (
 	"github.com/onsi/gomega"
 )
 
-// Multi-tenant scenario from docs/guides/multitenant on the Redis SortedSet
+// Multi-tenant scenario from the multi-tenant guide on the Redis SortedSet
 // backend: three teams (premium/standard/batch) with per-team quota gates and a
 // per-team saturation (priority) gate. These specs assert the guide's two
 // headline behaviors:

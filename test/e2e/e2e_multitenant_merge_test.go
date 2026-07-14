@@ -12,8 +12,8 @@ import (
 	"github.com/llm-d-incubation/llm-d-async/api"
 )
 
-// Validates the guide's reserved-vs-overflow priority model end-to-end
-// (docs/guides/multitenant): a shared pool + classifying redis-quota gate +
+// Validates the multi-tenant guide's reserved-vs-overflow priority model
+// end-to-end: a shared pool + classifying redis-quota gate +
 // the tier-priority merge policy. With a single worker, dispatch order equals
 // the merge policy's lane order, so we can assert that `reserved` traffic drains
 // before `overflow` even when the overflow was enqueued first.

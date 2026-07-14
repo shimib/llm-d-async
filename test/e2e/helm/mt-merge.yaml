@@ -1,5 +1,5 @@
-# Shared-pool + classifying quota + tier-priority merge policy — the guide's
-# reserved-vs-overflow priority model (docs/guides/multitenant). Two team queues
+# Shared-pool + classifying quota + tier-priority merge policy — the multi-tenant
+# guide's reserved-vs-overflow priority model. Two team queues
 # feed ONE pool with a single worker (deterministic dispatch order); the
 # redis-quota gate runs in `classifying` mode (within quota -> reserved, over ->
 # overflow) and the tier-priority merge policy dispatches lanes in strict order.

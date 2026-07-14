@@ -1,4 +1,4 @@
-# Multi-tenant scenario from docs/guides/multitenant on the Redis SortedSet
+# Multi-tenant scenario from the multi-tenant guide on the Redis SortedSet
 # backend: three teams (premium/standard/batch), each with its own queue, worker
 # pool, per-team quota, and priority tier — the guide's two-level gating model:
 #
