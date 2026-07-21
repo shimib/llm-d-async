@@ -23,6 +23,7 @@ import (
 
 	"github.com/llm-d/llm-d-async/api"
 	"github.com/llm-d/llm-d-async/pipeline"
+	"github.com/llm-d/llm-d-async/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -38,6 +39,14 @@ type MetricDispatchGate struct {
 	source    MetricSource
 	threshold float64
 	fallback  float64
+	poolLabel string
+}
+
+// WithPoolLabel sets the pool name used to label the async_gate_metric_value and
+// async_gate_metric_threshold gauges this gate records on each evaluation.
+func (g *MetricDispatchGate) WithPoolLabel(pool string) *MetricDispatchGate {
+	g.poolLabel = pool
+	return g
 }
 
 // NewMetricDispatchGate creates a MetricDispatchGate with the given source, threshold,
@@ -90,6 +99,10 @@ func (g *MetricDispatchGate) Budget(ctx context.Context) float64 {
 		logger.Error(fmt.Errorf("invalid metric value: %v", value), "using fallback value", "fallback", g.fallback)
 		return g.fallback
 	}
+
+	// Expose the raw value and threshold so operators can see why the gate is
+	// open/closed (it closes when value <= threshold).
+	metrics.SetGateMetricValue(value, g.threshold, g.poolLabel)
 
 	if value <= g.threshold {
 		return 0.0

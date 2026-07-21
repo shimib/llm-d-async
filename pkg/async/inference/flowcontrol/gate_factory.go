@@ -229,7 +229,8 @@ func (f *GateFactory) CreateGate(cfg pipeline.GateConfig) (pipeline.Gate, error)
 		if f.cacheTTL > 0 {
 			ms = NewCachedMetricSource(source, f.cacheTTL)
 		}
-		return NewSaturationDispatchGate(ms, threshold, fallback), nil
+		return NewSaturationDispatchGate(ms, threshold, fallback).
+			WithPoolLabel(paramString(params, "pool", "")), nil
 
 	case "prometheus-budget":
 		if f.prometheusURL == "" {
@@ -275,7 +276,7 @@ func (f *GateFactory) CreateGate(cfg pipeline.GateConfig) (pipeline.Gate, error)
 			cachedSource(primary, f.cacheTTL),
 			cachedSource(secondary, f.cacheTTL),
 		)
-		return NewBudgetDispatchGate(ms, baseline, fallback), nil
+		return NewBudgetDispatchGate(ms, baseline, fallback).WithPoolLabel(pool), nil
 
 	case "prometheus-query":
 		if f.prometheusURL == "" {
@@ -297,7 +298,10 @@ func (f *GateFactory) CreateGate(cfg pipeline.GateConfig) (pipeline.Gate, error)
 		if err != nil {
 			return nil, err
 		}
-		return NewMetricDispatchGate(cachedSource(source, f.cacheTTL), 0.0, fallback), nil
+		// Optional 'pool' param labels the async_gate_metric_value gauge; set it to
+		// match the inference pool referenced in the query.
+		return NewMetricDispatchGate(cachedSource(source, f.cacheTTL), 0.0, fallback).
+			WithPoolLabel(paramString(params, "pool", "")), nil
 
 	case "endpoint-scrape":
 		url := paramString(params, "url", "")

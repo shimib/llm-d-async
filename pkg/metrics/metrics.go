@@ -103,6 +103,14 @@ var (
 		Subsystem: SchedulerSubsystem, Name: "async_gate_decisions_total",
 		Help: "Count of gate decisions that prevented a message from being dispatched, by reason (gate_closed, quota_exhausted, dropped, error).",
 	}, []string{LabelQueueID, LabelQueueName, LabelPoolName, LabelReason})
+	GateMetricValue = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Subsystem: SchedulerSubsystem, Name: "async_gate_metric_value",
+		Help: "Raw metric value last read by a metric-based dispatch gate (prometheus-saturation/-budget/-query), i.e. the value compared against async_gate_metric_threshold to decide the gate. The gate closes when value <= threshold. For the saturation gate the value is 1 - saturation.",
+	}, []string{LabelPoolName})
+	GateMetricThreshold = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Subsystem: SchedulerSubsystem, Name: "async_gate_metric_threshold",
+		Help: "Threshold a metric-based dispatch gate compares async_gate_metric_value against; the gate closes when value <= this threshold.",
+	}, []string{LabelPoolName})
 )
 
 // Gate decision reason label values for async_gate_decisions_total.
@@ -193,12 +201,21 @@ func RecordGateDecision(reason, queueID, queueName, poolName string) {
 	GateDecisions.WithLabelValues(queueID, queueName, poolName, reason).Inc()
 }
 
+// SetGateMetricValue records the raw metric value a metric-based dispatch gate
+// last read and the threshold it is compared against, for the given pool. Helps
+// answer "why is the gate closed?" (value <= threshold).
+func SetGateMetricValue(value, threshold float64, poolName string) {
+	GateMetricValue.WithLabelValues(poolName).Set(value)
+	GateMetricThreshold.WithLabelValues(poolName).Set(threshold)
+}
+
 // GetCollectors returns all custom collectors for the async processor.
 func GetAsyncProcessorCollectors(supportsMessageLatency bool) []prometheus.Collector {
 	collectors := []prometheus.Collector{
 		Retries, AsyncReqs, ExceededDeadlineReqs, FailedReqs, SuccessfulReqs, SheddedRequests,
 		QueueDepth, InflightRequests, BrokerBacklog, InferenceLatencyTime, QueueResidenceTime,
 		DispatchBudget, PoolWorkerLimit, GateDecisions,
+		GateMetricValue, GateMetricThreshold,
 	}
 	if supportsMessageLatency {
 		collectors = append(collectors, MessageLatencyTime)

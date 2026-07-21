@@ -23,6 +23,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/llm-d/llm-d-async/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -112,6 +114,25 @@ func TestBudgetDispatchGate(t *testing.T) {
 			require.InDelta(t, tt.expected, gate.Budget(context.Background()), 1e-9)
 		})
 	}
+}
+
+// TestMetricDispatchGate_RecordsGateMetricValue verifies that a metric gate
+// records the raw value it read and the threshold it compared against, labeled by
+// pool (issue #217, "Saturation Metric Value").
+func TestMetricDispatchGate_RecordsGateMetricValue(t *testing.T) {
+	const pool = "test-pool-217"
+	metrics.GateMetricValue.DeleteLabelValues(pool)
+	metrics.GateMetricThreshold.DeleteLabelValues(pool)
+
+	// Saturation gate: source returns D = 1 - saturation; the gate's threshold is
+	// 1 - satThreshold. With saturation 0.3 -> D=0.7, satThreshold 0.8 -> thr=0.2.
+	source := &mockMetricSource{samples: []Sample{{Value: 0.7}}}
+	gate := NewSaturationDispatchGate(source, 0.8, 0.0).WithPoolLabel(pool)
+
+	_ = gate.Budget(context.Background())
+
+	require.InDelta(t, 0.7, testutil.ToFloat64(metrics.GateMetricValue.WithLabelValues(pool)), 1e-9)
+	require.InDelta(t, 0.2, testutil.ToFloat64(metrics.GateMetricThreshold.WithLabelValues(pool)), 1e-9)
 }
 
 // switchableMetricSource allows changing what Query returns between calls.
