@@ -112,6 +112,11 @@ func (f *GateFactory) Close() error {
 //     is in [0, 1]. Unlike prometheus-saturation and prometheus-budget, this gate does not
 //     construct queries internally — the user provides the complete PromQL expression.
 //     Params: query (required), fallback (default 0.0)
+//   - "policy-version": Admits a request only when the policy version named in its metadata
+//     matches the version published under a Redis key. A request ahead of the backend parks,
+//     one behind it is dropped. Park only takes effect for a worker-pool gate.
+//     Params: address (required), attribute (default "policy_version"),
+//     version_key (default "policy:live_version")
 //
 // For unsupported or unknown gate types, returns ConstOpenGate as a safe default.
 func (f *GateFactory) CreateGate(cfg pipeline.GateConfig) (pipeline.Gate, error) {
@@ -228,6 +233,22 @@ func (f *GateFactory) CreateGate(cfg pipeline.GateConfig) (pipeline.Gate, error)
 		}
 
 		return gate, nil
+
+	case "policy-version":
+		addr := paramString(params, "address", "")
+		if addr == "" {
+			return nil, fmt.Errorf("policy-version gate requires an 'address' in gate_params")
+		}
+		client, ok := f.redisClients[addr]
+		if !ok {
+			client = goredis.NewClient(&goredis.Options{Addr: addr})
+			f.redisClients[addr] = client
+		}
+
+		attr := paramString(params, "attribute", redisgate.DefaultPolicyVersionAttribute)
+		versionKey := paramString(params, "version_key", redisgate.DefaultPolicyVersionKey)
+
+		return redisgate.NewPolicyVersionGate(client, attr, versionKey), nil
 
 	case "prometheus-saturation":
 		if f.prometheusURL == "" {
