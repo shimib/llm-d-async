@@ -43,7 +43,7 @@ func TestPolicyVersionGate_Integration(t *testing.T) {
 	defer func() { _ = rdb.Close() }()
 
 	gate := redisgate.NewPolicyVersionGate(rdb,
-		redisgate.DefaultPolicyVersionAttribute, redisgate.DefaultPolicyVersionKey)
+		redisgate.DefaultPolicyVersionAttribute, redisgate.DefaultPolicyVersionKey, "userid")
 
 	client := asyncworker.NewHTTPInferenceClient(server.Client())
 	requestChannel := make(chan pipeline.EmbelishedRequestMessage, 5)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/llm-d/llm-d-async/api"
 	"github.com/llm-d/llm-d-async/pipeline"
@@ -20,6 +21,9 @@ const (
 	// DefaultPolicyVersionKey is the Redis key holding the version currently
 	// loaded by the inference backend.
 	DefaultPolicyVersionKey = "policy:live_version"
+	// TenantPlaceholder is the substring of a version key replaced with the
+	// requesting tenant.
+	TenantPlaceholder = "{tenant}"
 )
 
 // PolicyVersionGate admits a request only when the policy version it asks for
@@ -36,22 +40,27 @@ const (
 // The parking verdict only takes effect for a worker-pool gate: the queue-side
 // dequeue paths act on Refuse and Drop but dispatch on Wait.
 type PolicyVersionGate struct {
-	rdb        *redis.Client
-	attribute  string
-	versionKey string
+	rdb             *redis.Client
+	attribute       string
+	versionKey      string
+	tenantAttribute string
 }
 
 // NewPolicyVersionGate builds a gate reading the requested version from the
 // named message attribute, metadata first and forwarded headers second, and the
 // live version from versionKey.
 //
-// attribute is matched against the header name verbatim, so a coordinator
-// forwarding the version must list it under exactly this string.
-func NewPolicyVersionGate(client *redis.Client, attribute, versionKey string) *PolicyVersionGate {
+// A versionKey containing TenantPlaceholder is resolved per request, reading the
+// tenant from tenantAttribute the same way; see versionKeyFor.
+//
+// Both attributes are matched against header names verbatim, so a coordinator
+// forwarding either must list it under exactly this string.
+func NewPolicyVersionGate(client *redis.Client, attribute, versionKey, tenantAttribute string) *PolicyVersionGate {
 	return &PolicyVersionGate{
-		rdb:        client,
-		attribute:  attribute,
-		versionKey: versionKey,
+		rdb:             client,
+		attribute:       attribute,
+		versionKey:      versionKey,
+		tenantAttribute: tenantAttribute,
 	}
 }
 
@@ -69,7 +78,14 @@ func (g *PolicyVersionGate) Apply(ctx context.Context, msg *api.InternalRequest,
 		return pipeline.Continue(), nil
 	}
 
-	live, err := g.rdb.Get(ctx, g.versionKey).Result()
+	key := g.versionKeyFor(msg)
+	if key == "" {
+		// Per-tenant key with no tenant on the request: there is no published
+		// version this request can be measured against.
+		return pipeline.Continue(), nil
+	}
+
+	live, err := g.rdb.Get(ctx, key).Result()
 	if errors.Is(err, redis.Nil) {
 		// Nothing has been published yet; there is no version to disagree with.
 		return pipeline.Continue(), nil
@@ -77,7 +93,7 @@ func (g *PolicyVersionGate) Apply(ctx context.Context, msg *api.InternalRequest,
 	if err != nil {
 		// Fail open, matching the quota gate: a Redis outage must not stall
 		// every worker in the pool.
-		return pipeline.Continue(), fmt.Errorf("failed to read live policy version %q: %w", g.versionKey, err)
+		return pipeline.Continue(), fmt.Errorf("failed to read live policy version %q: %w", key, err)
 	}
 
 	if want == live {
@@ -96,22 +112,54 @@ func (g *PolicyVersionGate) Apply(ctx context.Context, msg *api.InternalRequest,
 	return pipeline.Wait(), nil
 }
 
-// requestedVersion reads the wanted version from message metadata, falling back
-// to the forwarded HTTP headers.
+// requestedVersion reads the wanted version off the request.
+func (g *PolicyVersionGate) requestedVersion(msg *api.InternalRequest) string {
+	return g.lookup(msg, g.attribute)
+}
+
+// versionKeyFor resolves the Redis key holding the live version for this
+// request.
+//
+// A key naming no tenant is shared by every request, which is right for a single
+// training job and wrong for several: each publishes its own snapshot counter to
+// the one key, so they overwrite each other and whichever job sits on the lower
+// counter has every rollout dropped as stale. Templating the key per tenant
+// gives each job its own version namespace on a shared pool.
+//
+// A templated key resolves to nothing, rather than to a literal placeholder,
+// when the request names no tenant. Substituting nothing would silently point
+// every such request at one key and reintroduce exactly the collision the
+// template exists to avoid.
+func (g *PolicyVersionGate) versionKeyFor(msg *api.InternalRequest) string {
+	if !strings.Contains(g.versionKey, TenantPlaceholder) {
+		return g.versionKey
+	}
+	tenant := g.lookup(msg, g.tenantAttribute)
+	if tenant == "" {
+		return ""
+	}
+	return strings.ReplaceAll(g.versionKey, TenantPlaceholder, tenant)
+}
+
+// lookup reads a named attribute from message metadata, falling back to the
+// forwarded HTTP headers.
 //
 // The fallback is what makes the gate usable behind an unmodified coordinator.
 // The async-broker fills Metadata with exactly two hardcoded entries, the quota
 // attribute and traceparent; its one configurable header allowlist,
 // forward_headers, lands in Headers instead. Reading only Metadata would
-// therefore require patching the coordinator to carry this one value, so the
-// gate reads both. Metadata wins when set, which keeps a producer that submits
-// to the queue directly, where Metadata is the natural field, from being
-// overridden by a stray header.
-func (g *PolicyVersionGate) requestedVersion(msg *api.InternalRequest) string {
-	if v := msg.PublicRequest.ReqMetadata()[g.attribute]; v != "" {
+// therefore require patching the coordinator to carry these values, so the gate
+// reads both. Metadata wins when set, which keeps a producer that submits to the
+// queue directly, where Metadata is the natural field, from being overridden by
+// a stray header.
+func (g *PolicyVersionGate) lookup(msg *api.InternalRequest, name string) string {
+	if name == "" {
+		return ""
+	}
+	if v := msg.PublicRequest.ReqMetadata()[name]; v != "" {
 		return v
 	}
-	return msg.PublicRequest.ReqHeaders()[g.attribute]
+	return msg.PublicRequest.ReqHeaders()[name]
 }
 
 // isStale reports whether want has been superseded by live. Versions are

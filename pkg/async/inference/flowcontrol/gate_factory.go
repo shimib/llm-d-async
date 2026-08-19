@@ -247,8 +247,9 @@ func (f *GateFactory) CreateGate(cfg pipeline.GateConfig) (pipeline.Gate, error)
 
 		attr := paramString(params, "attribute", redisgate.DefaultPolicyVersionAttribute)
 		versionKey := paramString(params, "version_key", redisgate.DefaultPolicyVersionKey)
+		tenantAttr := paramString(params, "tenant_attribute", "userid")
 
-		return redisgate.NewPolicyVersionGate(client, attr, versionKey), nil
+		return redisgate.NewPolicyVersionGate(client, attr, versionKey, tenantAttr), nil
 
 	case "prometheus-saturation":
 		if f.prometheusURL == "" {

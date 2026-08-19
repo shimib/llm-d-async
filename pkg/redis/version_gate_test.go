@@ -15,7 +15,18 @@ func newVersionGate(t *testing.T) (*PolicyVersionGate, *miniredis.Miniredis) {
 	s := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	return NewPolicyVersionGate(rdb, DefaultPolicyVersionAttribute, DefaultPolicyVersionKey), s
+	return NewPolicyVersionGate(rdb, DefaultPolicyVersionAttribute, DefaultPolicyVersionKey, testTenantAttribute), s
+}
+
+const testTenantAttribute = "userid"
+
+// newTenantVersionGate builds a gate whose version key is namespaced per tenant.
+func newTenantVersionGate(t *testing.T) (*PolicyVersionGate, *miniredis.Miniredis) {
+	t.Helper()
+	s := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	return NewPolicyVersionGate(rdb, DefaultPolicyVersionAttribute, DefaultPolicyVersionKey+":"+TenantPlaceholder, testTenantAttribute), s
 }
 
 func applyVersion(t *testing.T, gate *PolicyVersionGate, want string) (pipeline.Verdict, error) {
@@ -112,6 +123,54 @@ func TestPolicyVersionGate_BudgetIsOpen(t *testing.T) {
 	gate, _ := newVersionGate(t)
 	if budget := gate.Budget(context.Background()); budget != 1.0 {
 		t.Fatalf("expected an open budget of 1.0, got %v", budget)
+	}
+}
+
+// TestPolicyVersionGate_PerTenantVersionKey covers the case the single shared
+// key cannot serve: two training jobs on one pool, each publishing its own
+// snapshot counter. Against a shared key job B's counter of 4 would make every
+// job A rollout at 12 look stale; namespaced, each job is judged against its own
+// published version.
+func TestPolicyVersionGate_PerTenantVersionKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		tenant   string
+		want     string
+		expected pipeline.VerdictAction
+	}{
+		{name: "job A matches its own version", tenant: "team-a", want: "12", expected: pipeline.ActionContinue},
+		{name: "job B matches its own version", tenant: "team-b", want: "4", expected: pipeline.ActionContinue},
+		{name: "job A is not judged against job B", tenant: "team-a", want: "5", expected: pipeline.ActionDrop},
+		{name: "job B is not judged against job A", tenant: "team-b", want: "5", expected: pipeline.ActionWait},
+		{name: "tenant with no published version", tenant: "team-c", want: "1", expected: pipeline.ActionContinue},
+		// Without a tenant the key cannot be resolved, and admitting is the
+		// same fail-open the gate takes for a request naming no version.
+		{name: "no tenant on the request", tenant: "", want: "1", expected: pipeline.ActionContinue},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gate, s := newTenantVersionGate(t)
+			for tenant, live := range map[string]string{"team-a": "12", "team-b": "4"} {
+				if err := s.Set(DefaultPolicyVersionKey+":"+tenant, live); err != nil {
+					t.Fatalf("failed to seed live version for %s: %v", tenant, err)
+				}
+			}
+
+			headers := map[string]string{DefaultPolicyVersionAttribute: tt.want}
+			if tt.tenant != "" {
+				headers[testTenantAttribute] = tt.tenant
+			}
+			msg := api.NewInternalRequest(api.InternalRouting{}, &api.RequestMessage{ID: "req1", Headers: headers})
+			var releases []pipeline.GateReleaseFunc
+			verdict, err := gate.Apply(context.Background(), msg, &releases)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if verdict.Action != tt.expected {
+				t.Errorf("Action = %v, want %v", verdict.Action, tt.expected)
+			}
+		})
 	}
 }
 
