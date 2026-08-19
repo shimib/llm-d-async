@@ -114,3 +114,66 @@ func TestPolicyVersionGate_BudgetIsOpen(t *testing.T) {
 		t.Fatalf("expected an open budget of 1.0, got %v", budget)
 	}
 }
+
+// The async-broker coordinator can only be configured to forward the version as
+// an HTTP header, never as metadata, so the header path is the one the
+// deployed topology actually exercises.
+func TestPolicyVersionGate_ReadsVersionFromHeaders(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata map[string]string
+		headers  map[string]string
+		expected pipeline.VerdictAction
+	}{
+		{
+			name:     "header only, stale",
+			headers:  map[string]string{DefaultPolicyVersionAttribute: "7"},
+			expected: pipeline.ActionDrop,
+		},
+		{
+			name:     "header only, matching",
+			headers:  map[string]string{DefaultPolicyVersionAttribute: "8"},
+			expected: pipeline.ActionContinue,
+		},
+		{
+			name:     "header only, ahead",
+			headers:  map[string]string{DefaultPolicyVersionAttribute: "9"},
+			expected: pipeline.ActionWait,
+		},
+		{
+			name:     "neither set",
+			expected: pipeline.ActionContinue,
+		},
+		{
+			// A direct producer setting metadata must not be overridden by a
+			// header the coordinator happened to forward.
+			name:     "metadata wins over header",
+			metadata: map[string]string{DefaultPolicyVersionAttribute: "8"},
+			headers:  map[string]string{DefaultPolicyVersionAttribute: "7"},
+			expected: pipeline.ActionContinue,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gate, s := newVersionGate(t)
+			if err := s.Set(DefaultPolicyVersionKey, "8"); err != nil {
+				t.Fatalf("failed to seed live version: %v", err)
+			}
+
+			msg := api.NewInternalRequest(api.InternalRouting{}, &api.RequestMessage{
+				ID:       "req1",
+				Metadata: tt.metadata,
+				Headers:  tt.headers,
+			})
+			var releases []pipeline.GateReleaseFunc
+			verdict, err := gate.Apply(context.Background(), msg, &releases)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if verdict.Action != tt.expected {
+				t.Errorf("Action = %v, want %v", verdict.Action, tt.expected)
+			}
+		})
+	}
+}

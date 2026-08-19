@@ -42,7 +42,11 @@ type PolicyVersionGate struct {
 }
 
 // NewPolicyVersionGate builds a gate reading the requested version from the
-// named message metadata attribute and the live version from versionKey.
+// named message attribute, metadata first and forwarded headers second, and the
+// live version from versionKey.
+//
+// attribute is matched against the header name verbatim, so a coordinator
+// forwarding the version must list it under exactly this string.
 func NewPolicyVersionGate(client *redis.Client, attribute, versionKey string) *PolicyVersionGate {
 	return &PolicyVersionGate{
 		rdb:        client,
@@ -59,8 +63,8 @@ func (g *PolicyVersionGate) Budget(ctx context.Context) float64 {
 
 // Apply implements pipeline.Gate.
 func (g *PolicyVersionGate) Apply(ctx context.Context, msg *api.InternalRequest, releases *[]pipeline.GateReleaseFunc) (pipeline.Verdict, error) {
-	want, ok := msg.PublicRequest.ReqMetadata()[g.attribute]
-	if !ok || want == "" {
+	want := g.requestedVersion(msg)
+	if want == "" {
 		// Requests that name no version are not version-coupled.
 		return pipeline.Continue(), nil
 	}
@@ -90,6 +94,24 @@ func (g *PolicyVersionGate) Apply(ctx context.Context, msg *api.InternalRequest,
 	// ordered. Park until the backend catches up; the worker's deadline bounds
 	// the wait.
 	return pipeline.Wait(), nil
+}
+
+// requestedVersion reads the wanted version from message metadata, falling back
+// to the forwarded HTTP headers.
+//
+// The fallback is what makes the gate usable behind an unmodified coordinator.
+// The async-broker fills Metadata with exactly two hardcoded entries, the quota
+// attribute and traceparent; its one configurable header allowlist,
+// forward_headers, lands in Headers instead. Reading only Metadata would
+// therefore require patching the coordinator to carry this one value, so the
+// gate reads both. Metadata wins when set, which keeps a producer that submits
+// to the queue directly, where Metadata is the natural field, from being
+// overridden by a stray header.
+func (g *PolicyVersionGate) requestedVersion(msg *api.InternalRequest) string {
+	if v := msg.PublicRequest.ReqMetadata()[g.attribute]; v != "" {
+		return v
+	}
+	return msg.PublicRequest.ReqHeaders()[g.attribute]
 }
 
 // isStale reports whether want has been superseded by live. Versions are
