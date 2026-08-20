@@ -43,7 +43,7 @@ func TestPolicyVersionGate_Integration(t *testing.T) {
 	defer func() { _ = rdb.Close() }()
 
 	gate := redisgate.NewPolicyVersionGate(rdb,
-		redisgate.DefaultPolicyVersionAttribute, redisgate.DefaultPolicyVersionKey, "userid")
+		redisgate.DefaultPolicyVersionAttribute, redisgate.DefaultPolicyVersionKey, "userid", 0)
 
 	client := asyncworker.NewHTTPInferenceClient(server.Client())
 	requestChannel := make(chan pipeline.EmbelishedRequestMessage, 5)
@@ -186,4 +186,21 @@ func TestGateFactory_PolicyVersion(t *testing.T) {
 	verdict, err = gate.Apply(ctx, stale, &releases)
 	require.NoError(t, err)
 	assert.Equal(t, pipeline.ActionDrop, verdict.Action)
+
+	// max_lag widens what counts as current, so the same request that was
+	// stale above is admitted by a gate configured to the trainer's tolerance.
+	tolerant, err := factory.CreateGate(pipeline.GateConfig{GateType: "policy-version", GateParams: map[string]any{
+		"address": mr.Addr(),
+		"max_lag": 2,
+	}})
+	require.NoError(t, err)
+	verdict, err = tolerant.Apply(ctx, stale, &releases)
+	require.NoError(t, err)
+	assert.Equal(t, pipeline.ActionContinue, verdict.Action)
+
+	_, err = factory.CreateGate(pipeline.GateConfig{GateType: "policy-version", GateParams: map[string]any{
+		"address": mr.Addr(),
+		"max_lag": -1,
+	}})
+	assert.Error(t, err, "should reject a negative max_lag")
 }

@@ -113,10 +113,11 @@ func (f *GateFactory) Close() error {
 //     construct queries internally — the user provides the complete PromQL expression.
 //     Params: query (required), fallback (default 0.0)
 //   - "policy-version": Admits a request only when the policy version named in its metadata
-//     matches the version published under a Redis key. A request ahead of the backend parks,
-//     one behind it is dropped. Park only takes effect for a worker-pool gate.
+//     is within max_lag of the version published under a Redis key. A request ahead of the
+//     backend parks, one further behind than max_lag is dropped. Park only takes effect for
+//     a worker-pool gate.
 //     Params: address (required), attribute (default "policy_version"),
-//     version_key (default "policy:live_version")
+//     version_key (default "policy:live_version"), max_lag (default 0)
 //
 // For unsupported or unknown gate types, returns ConstOpenGate as a safe default.
 func (f *GateFactory) CreateGate(cfg pipeline.GateConfig) (pipeline.Gate, error) {
@@ -248,8 +249,15 @@ func (f *GateFactory) CreateGate(cfg pipeline.GateConfig) (pipeline.Gate, error)
 		attr := paramString(params, "attribute", redisgate.DefaultPolicyVersionAttribute)
 		versionKey := paramString(params, "version_key", redisgate.DefaultPolicyVersionKey)
 		tenantAttr := paramString(params, "tenant_attribute", "userid")
+		maxLag, err := paramInt(params, "max_lag", 0)
+		if err != nil {
+			return nil, err
+		}
+		if maxLag < 0 {
+			return nil, fmt.Errorf("policy-version gate 'max_lag' must not be negative, got %d", maxLag)
+		}
 
-		return redisgate.NewPolicyVersionGate(client, attr, versionKey, tenantAttr), nil
+		return redisgate.NewPolicyVersionGate(client, attr, versionKey, tenantAttr, int64(maxLag)), nil
 
 	case "prometheus-saturation":
 		if f.prometheusURL == "" {

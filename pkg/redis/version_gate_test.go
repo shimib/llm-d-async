@@ -15,7 +15,7 @@ func newVersionGate(t *testing.T) (*PolicyVersionGate, *miniredis.Miniredis) {
 	s := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	return NewPolicyVersionGate(rdb, DefaultPolicyVersionAttribute, DefaultPolicyVersionKey, testTenantAttribute), s
+	return NewPolicyVersionGate(rdb, DefaultPolicyVersionAttribute, DefaultPolicyVersionKey, testTenantAttribute, 0), s
 }
 
 const testTenantAttribute = "userid"
@@ -26,7 +26,7 @@ func newTenantVersionGate(t *testing.T) (*PolicyVersionGate, *miniredis.Miniredi
 	s := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	return NewPolicyVersionGate(rdb, DefaultPolicyVersionAttribute, DefaultPolicyVersionKey+":"+TenantPlaceholder, testTenantAttribute), s
+	return NewPolicyVersionGate(rdb, DefaultPolicyVersionAttribute, DefaultPolicyVersionKey+":"+TenantPlaceholder, testTenantAttribute, 0), s
 }
 
 func applyVersion(t *testing.T, gate *PolicyVersionGate, want string) (pipeline.Verdict, error) {
@@ -63,6 +63,48 @@ func TestPolicyVersionGate_Verdicts(t *testing.T) {
 				if err := s.Set(DefaultPolicyVersionKey, tt.live); err != nil {
 					t.Fatalf("failed to seed live version: %v", err)
 				}
+			}
+
+			verdict, err := applyVersion(t, gate, tt.want)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if verdict.Action != tt.expected {
+				t.Fatalf("expected action %v, got %v", tt.expected, verdict.Action)
+			}
+		})
+	}
+}
+
+// TestPolicyVersionGate_MaxLagTolerance covers the off-policy case. A trainer
+// that samples and trains concurrently expects rollouts a bounded number of
+// versions behind and requeues only what exceeds that, so a gate dropping every
+// request one version old would discard work the trainer meant to use. Only a
+// request past the declared tolerance is stale; running ahead still parks,
+// because no tolerance makes an unpublished version servable.
+func TestPolicyVersionGate_MaxLagTolerance(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxLag   int64
+		live     string
+		want     string
+		expected pipeline.VerdictAction
+	}{
+		{name: "inside tolerance", maxLag: 2, live: "9", want: "8", expected: pipeline.ActionContinue},
+		{name: "exactly at tolerance", maxLag: 2, live: "9", want: "7", expected: pipeline.ActionContinue},
+		{name: "one past tolerance", maxLag: 2, live: "9", want: "6", expected: pipeline.ActionDrop},
+		{name: "ahead of backend ignores tolerance", maxLag: 2, live: "9", want: "10", expected: pipeline.ActionWait},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := miniredis.RunT(t)
+			rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+			t.Cleanup(func() { _ = rdb.Close() })
+			gate := NewPolicyVersionGate(rdb, DefaultPolicyVersionAttribute, DefaultPolicyVersionKey, testTenantAttribute, tt.maxLag)
+
+			if err := s.Set(DefaultPolicyVersionKey, tt.live); err != nil {
+				t.Fatalf("failed to seed live version: %v", err)
 			}
 
 			verdict, err := applyVersion(t, gate, tt.want)
