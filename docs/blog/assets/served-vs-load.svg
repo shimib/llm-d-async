@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 440" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <rect x="0" y="0" width="760" height="440" rx="12" fill="#fcfcfb"/>
+  <rect x="0.5" y="0.5" width="759" height="439" rx="12" fill="none" stroke="rgba(11,11,11,0.10)"/>
+
+  <text x="28" y="38" font-size="17" font-weight="600" fill="#0b0b0b">Requests answered under rising background load</text>
+  <text x="28" y="58" font-size="12.5" fill="#52514e">Share of 90 agentic requests served, by arm &#183; EPP flow control off</text>
+
+  <!-- legend -->
+  <rect x="28" y="72" width="12" height="12" rx="3" fill="#2a78d6"/>
+  <text x="46" y="82" font-size="12" fill="#52514e">gw-direct (no queue)</text>
+  <rect x="180" y="72" width="12" height="12" rx="3" fill="#eb6834"/>
+  <text x="198" y="82" font-size="12" fill="#52514e">passthrough (hop, no gate)</text>
+  <rect x="370" y="72" width="12" height="12" rx="3" fill="#1baf7a"/>
+  <text x="388" y="82" font-size="12" fill="#52514e">wait (queue + admission gate)</text>
+
+  <!-- gridlines -->
+  <line x1="60" y1="100" x2="600" y2="100" stroke="#e1e0d9" stroke-width="1"/>
+  <line x1="60" y1="172.5" x2="600" y2="172.5" stroke="#e1e0d9" stroke-width="1"/>
+  <line x1="60" y1="245" x2="600" y2="245" stroke="#e1e0d9" stroke-width="1"/>
+  <line x1="60" y1="317.5" x2="600" y2="317.5" stroke="#e1e0d9" stroke-width="1"/>
+  <line x1="60" y1="390" x2="600" y2="390" stroke="#c3c2b7" stroke-width="1"/>
+
+  <!-- y tick labels -->
+  <text x="52" y="104" font-size="11" fill="#898781" text-anchor="end">100%</text>
+  <text x="52" y="176.5" font-size="11" fill="#898781" text-anchor="end">75%</text>
+  <text x="52" y="249" font-size="11" fill="#898781" text-anchor="end">50%</text>
+  <text x="52" y="321.5" font-size="11" fill="#898781" text-anchor="end">25%</text>
+  <text x="52" y="394" font-size="11" fill="#898781" text-anchor="end">0</text>
+
+  <!-- x tick labels -->
+  <text x="60" y="408" font-size="10" fill="#898781" text-anchor="middle">bg0</text>
+  <text x="240" y="408" font-size="10" fill="#898781" text-anchor="middle">bg50</text>
+  <text x="384" y="408" font-size="10" fill="#898781" text-anchor="middle">bg90</text>
+  <text x="420" y="422" font-size="10" fill="#898781" text-anchor="middle">bg100</text>
+  <text x="456" y="408" font-size="10" fill="#898781" text-anchor="middle">bg110</text>
+  <text x="492" y="422" font-size="10" fill="#898781" text-anchor="middle">bg120</text>
+  <text x="600" y="408" font-size="10" fill="#898781" text-anchor="middle">bg150</text>
+  <text x="330" y="434" font-size="11" fill="#898781" text-anchor="middle">background load, % of measured capacity</text>
+
+  <!-- passthrough -->
+  <polyline points="60,100 240,100 384,100 420,103.2 456,106.4 492,109.6 600,116.2" fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- wait -->
+  <polyline points="60,100 240,100 384,100 420,103.2 456,116.2 492,103.2 600,106.4" fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- gw-direct (drawn last: the story) -->
+  <polyline points="60,100 240,100 384,100 420,100 456,100 492,100 600,306.2" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+
+  <!-- markers, surface-ringed -->
+  <g fill="#eb6834" stroke="#fcfcfb" stroke-width="2">
+    <circle cx="60" cy="100" r="4"/><circle cx="240" cy="100" r="4"/><circle cx="384" cy="100" r="4"/><circle cx="420" cy="103.2" r="4"/><circle cx="456" cy="106.4" r="4"/><circle cx="492" cy="109.6" r="4"/><circle cx="600" cy="116.2" r="4"/>
+  </g>
+  <g fill="#1baf7a" stroke="#fcfcfb" stroke-width="2">
+    <circle cx="60" cy="100" r="4"/><circle cx="240" cy="100" r="4"/><circle cx="384" cy="100" r="4"/><circle cx="420" cy="103.2" r="4"/><circle cx="456" cy="116.2" r="4"/><circle cx="492" cy="103.2" r="4"/><circle cx="600" cy="106.4" r="4"/>
+  </g>
+  <g fill="#2a78d6" stroke="#fcfcfb" stroke-width="2">
+    <circle cx="60" cy="100" r="4"/><circle cx="240" cy="100" r="4"/><circle cx="384" cy="100" r="4"/><circle cx="420" cy="100" r="4"/><circle cx="456" cy="100" r="4"/><circle cx="492" cy="100" r="4"/><circle cx="600" cy="306.2" r="4"/>
+  </g>
+
+  <!-- end labels -->
+  <text x="610" y="104" font-size="11.5" fill="#0b0b0b">wait &#183; 98%</text>
+  <text x="610" y="123" font-size="11.5" fill="#0b0b0b">passthrough &#183; 94%</text>
+  <text x="610" y="303" font-size="11.5" fill="#0b0b0b">gw-direct &#183; 29%</text>
+  <text x="610" y="318" font-size="10.5" fill="#52514e">64 of 90 refused (503)</text>
+</svg>

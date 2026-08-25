@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 240" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <rect x="0" y="0" width="760" height="240" rx="12" fill="#fcfcfb"/>
+  <rect x="0.5" y="0.5" width="759" height="239" rx="12" fill="none" stroke="rgba(11,11,11,0.10)"/>
+
+  <text x="28" y="38" font-size="17" font-weight="600" fill="#0b0b0b">Requests answered at 150% of measured capacity</text>
+  <text x="28" y="58" font-size="12.5" fill="#52514e">Share of 90 agentic requests, by admission-control configuration</text>
+
+  <!-- baseline -->
+  <line x1="262" y1="80" x2="262" y2="196" stroke="#c3c2b7" stroke-width="1"/>
+
+  <!-- row 1: no admission control -->
+  <text x="250" y="100" font-size="12" fill="#52514e" text-anchor="end">no admission control</text>
+  <path d="M262,86 h113.4 q4,0 4,4 v12 q0,4 -4,4 h-113.4 z" fill="#2a78d6"/>
+  <text x="387" y="100" font-size="12.5" font-weight="600" fill="#0b0b0b">29%</text>
+
+  <!-- row 2: EPP flow control only -->
+  <text x="250" y="140" font-size="12" fill="#52514e" text-anchor="end">EPP flow control only</text>
+  <path d="M262,126 h412 q4,0 4,4 v12 q0,4 -4,4 h-412 z" fill="#2a78d6"/>
+  <text x="686" y="140" font-size="12.5" font-weight="600" fill="#0b0b0b">100%</text>
+
+  <!-- row 3: llm-d-async queue + gate -->
+  <text x="250" y="180" font-size="12" fill="#52514e" text-anchor="end">queue-based flow control</text>
+  <path d="M262,166 h402.8 q4,0 4,4 v12 q0,4 -4,4 h-402.8 z" fill="#2a78d6"/>
+  <text x="677" y="180" font-size="12.5" font-weight="600" fill="#0b0b0b">98%</text>
+
+  <text x="28" y="222" font-size="10.5" fill="#898781">Same backend, same 90 requests. "EPP flow control only" is the direct-to-gateway arm with the flowControl feature gate on.</text>
+</svg>

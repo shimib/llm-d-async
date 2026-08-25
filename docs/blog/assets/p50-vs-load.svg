@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 440" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <rect x="0" y="0" width="760" height="440" rx="12" fill="#fcfcfb"/>
+  <rect x="0.5" y="0.5" width="759" height="439" rx="12" fill="none" stroke="rgba(11,11,11,0.10)"/>
+
+  <text x="28" y="38" font-size="17" font-weight="600" fill="#0b0b0b">Median latency under rising background load</text>
+  <text x="28" y="58" font-size="12.5" fill="#52514e">p50 seconds per request &#183; EPP flow control off &#183; dashed = re-run with the gate set correctly</text>
+
+  <!-- legend -->
+  <rect x="28" y="72" width="12" height="12" rx="3" fill="#2a78d6"/>
+  <text x="46" y="82" font-size="12" fill="#52514e">gw-direct (no queue)</text>
+  <rect x="176" y="72" width="12" height="12" rx="3" fill="#eb6834"/>
+  <text x="194" y="82" font-size="12" fill="#52514e">passthrough (hop only)</text>
+  <rect x="342" y="72" width="12" height="12" rx="3" fill="#1baf7a"/>
+  <text x="360" y="82" font-size="12" fill="#52514e">wait (queue + gate)</text>
+  <line x1="498" y1="78" x2="514" y2="78" stroke="#1baf7a" stroke-width="2.5" stroke-dasharray="5 3"/>
+  <text x="520" y="82" font-size="12" fill="#52514e">wait, corrected gate (re-run)</text>
+
+  <!-- gridlines -->
+  <line x1="60" y1="100" x2="600" y2="100" stroke="#e1e0d9" stroke-width="1"/>
+  <line x1="60" y1="196.7" x2="600" y2="196.7" stroke="#e1e0d9" stroke-width="1"/>
+  <line x1="60" y1="293.3" x2="600" y2="293.3" stroke="#e1e0d9" stroke-width="1"/>
+  <line x1="60" y1="390" x2="600" y2="390" stroke="#c3c2b7" stroke-width="1"/>
+
+  <!-- y tick labels -->
+  <text x="52" y="104" font-size="11" fill="#898781" text-anchor="end">180s</text>
+  <text x="52" y="200.7" font-size="11" fill="#898781" text-anchor="end">120s</text>
+  <text x="52" y="297.3" font-size="11" fill="#898781" text-anchor="end">60s</text>
+  <text x="52" y="394" font-size="11" fill="#898781" text-anchor="end">0</text>
+
+  <!-- x tick labels -->
+  <text x="60" y="408" font-size="10" fill="#898781" text-anchor="middle">bg0</text>
+  <text x="240" y="408" font-size="10" fill="#898781" text-anchor="middle">bg50</text>
+  <text x="384" y="408" font-size="10" fill="#898781" text-anchor="middle">bg90</text>
+  <text x="420" y="422" font-size="10" fill="#898781" text-anchor="middle">bg100</text>
+  <text x="456" y="408" font-size="10" fill="#898781" text-anchor="middle">bg110</text>
+  <text x="492" y="422" font-size="10" fill="#898781" text-anchor="middle">bg120</text>
+  <text x="600" y="408" font-size="10" fill="#898781" text-anchor="middle">bg150</text>
+  <text x="330" y="434" font-size="11" fill="#898781" text-anchor="middle">background load, % of measured capacity</text>
+
+  <!-- passthrough -->
+  <polyline points="60,381.3 240,376.6 384,356.0 420,359.7 456,245.6 492,296.6 600,166.5" fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- wait (original, mis-set gate) -->
+  <polyline points="60,381.0 240,379.0 384,360.7 420,354.6 456,204.2 492,338.3 600,300.6" fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- wait, corrected gate (2026-08-25 re-run: setpoint 24, clocks 960s) -->
+  <polyline points="456,339.1 492,357.0 600,325.9" fill="none" stroke="#1baf7a" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- gw-direct -->
+  <polyline points="60,381.9 240,378.1 384,362.3 420,356.2 456,349.1 492,289.3 600,108.1" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+
+  <!-- markers, surface-ringed -->
+  <g fill="#eb6834" stroke="#fcfcfb" stroke-width="2">
+    <circle cx="60" cy="381.3" r="4"/><circle cx="240" cy="376.6" r="4"/><circle cx="384" cy="356.0" r="4"/><circle cx="420" cy="359.7" r="4"/><circle cx="456" cy="245.6" r="4"/><circle cx="492" cy="296.6" r="4"/><circle cx="600" cy="166.5" r="4"/>
+  </g>
+  <g fill="#1baf7a" stroke="#fcfcfb" stroke-width="2">
+    <circle cx="60" cy="381.0" r="4"/><circle cx="240" cy="379.0" r="4"/><circle cx="384" cy="360.7" r="4"/><circle cx="420" cy="354.6" r="4"/><circle cx="456" cy="204.2" r="4"/><circle cx="492" cy="338.3" r="4"/><circle cx="600" cy="300.6" r="4"/>
+  </g>
+  <g fill="#fcfcfb" stroke="#1baf7a" stroke-width="2">
+    <circle cx="456" cy="339.1" r="4"/><circle cx="492" cy="357.0" r="4"/><circle cx="600" cy="325.9" r="4"/>
+  </g>
+  <g fill="#2a78d6" stroke="#fcfcfb" stroke-width="2">
+    <circle cx="60" cy="381.9" r="4"/><circle cx="240" cy="378.1" r="4"/><circle cx="384" cy="362.3" r="4"/><circle cx="420" cy="356.2" r="4"/><circle cx="456" cy="349.1" r="4"/><circle cx="492" cy="289.3" r="4"/><circle cx="600" cy="108.1" r="4"/>
+  </g>
+
+  <!-- bg110 annotation -->
+  <text x="444" y="180" font-size="10.5" fill="#52514e" text-anchor="end">original bg110 run: gate held the</text>
+  <text x="444" y="193" font-size="10.5" fill="#52514e" text-anchor="end">backend below its setpoint (F-044)</text>
+
+  <!-- end labels -->
+  <text x="610" y="112" font-size="11.5" fill="#0b0b0b">gw-direct &#183; 175 s</text>
+  <text x="610" y="170" font-size="11.5" fill="#0b0b0b">passthrough &#183; 139 s</text>
+  <text x="610" y="304" font-size="11.5" fill="#0b0b0b">wait &#183; 56 s</text>
+  <text x="610" y="332" font-size="11.5" fill="#0b0b0b">corrected &#183; 40 s</text>
+</svg>
