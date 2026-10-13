@@ -191,42 +191,55 @@ func TestFlowControlQueueSizePromQL(t *testing.T) {
 	})
 }
 
-func TestPoolQueueSizePromQL(t *testing.T) {
+func TestPoolInFlightPromQL(t *testing.T) {
 	promConfig := api.Config{Address: "http://localhost:9090"}
 
 	t.Run("ContainsExpectedMetrics", func(t *testing.T) {
-		source, err := NewPoolQueueSizePromQL(promConfig, "my-pool", 100, "")
+		source, err := NewPoolInFlightPromQL(promConfig, "my-pool", 100, "")
 		require.NoError(t, err)
-		require.Equal(t, `1 - (avg by(name)(llm_d_epp_per_endpoint_queue_size{name="my-pool"}) / 100)`, source.expr)
+		require.Equal(t,
+			`(1 - (avg by(name)(llm_d_epp_average_running_requests{name="my-pool"} + llm_d_epp_average_queue_size{name="my-pool"}) / 100)) and on() (llm_d_epp_ready_endpoints{name="my-pool"} > 0)`,
+			source.expr)
 	})
 
-	t.Run("DoesNotDependOnFrozenPoolGauges", func(t *testing.T) {
-		// EPP's metrics refresh returns early at zero pods, so
-		// llm_d_epp_ready_endpoints and llm_d_epp_average_queue_size keep
-		// their last values and a drained pool reads as idle capacity. Averaging
-		// the scrape-time per-pod collector avoids both.
-		source, err := NewPoolQueueSizePromQL(promConfig, "my-pool", 100, "")
+	t.Run("CountsRunningRequestsNotOnlyWaiting", func(t *testing.T) {
+		// max_concurrency mirrors the saturation detector's in-flight count. vLLM
+		// runs up to max_num_seqs requests before any wait, so a waiting-only
+		// source reads 0 on a saturated pod and the gate never closes.
+		source, err := NewPoolInFlightPromQL(promConfig, "my-pool", 100, "")
 		require.NoError(t, err)
-		require.NotContains(t, source.expr, "llm_d_epp_ready_endpoints")
-		require.NotContains(t, source.expr, "llm_d_epp_average_queue_size")
+		require.Contains(t, source.expr, "llm_d_epp_average_running_requests")
+		require.NotContains(t, source.expr, "llm_d_epp_per_endpoint_queue_size")
+	})
+
+	t.Run("YieldsNoSampleWhenPoolDrained", func(t *testing.T) {
+		// EPP's metrics refresh returns early at zero fresh pods, so the pool
+		// averages keep their last values. llm_d_epp_ready_endpoints is recorded
+		// before that return, so gating on it makes a drained pool fall through
+		// the cascade instead of reading as idle capacity.
+		source, err := NewPoolInFlightPromQL(promConfig, "my-pool", 100, "")
+		require.NoError(t, err)
+		require.Contains(t, source.expr, `and on() (llm_d_epp_ready_endpoints{name="my-pool"} > 0)`)
 	})
 
 	t.Run("RequiresPool", func(t *testing.T) {
-		_, err := NewPoolQueueSizePromQL(promConfig, "", 100, "")
+		_, err := NewPoolInFlightPromQL(promConfig, "", 100, "")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "inference pool name is required")
 	})
 
 	t.Run("RequiresPositiveMaxConcurrency", func(t *testing.T) {
-		_, err := NewPoolQueueSizePromQL(promConfig, "my-pool", 0, "")
+		_, err := NewPoolInFlightPromQL(promConfig, "my-pool", 0, "")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "maxConcurrency must be positive")
 	})
 
 	t.Run("WithNamespace", func(t *testing.T) {
-		source, err := NewPoolQueueSizePromQL(promConfig, "my-pool", 100, "prod")
+		source, err := NewPoolInFlightPromQL(promConfig, "my-pool", 100, "prod")
 		require.NoError(t, err)
-		require.Contains(t, source.expr, `llm_d_epp_per_endpoint_queue_size{name="my-pool",namespace="prod"}`)
+		require.Contains(t, source.expr, `llm_d_epp_average_running_requests{name="my-pool",namespace="prod"}`)
+		require.Contains(t, source.expr, `llm_d_epp_average_queue_size{name="my-pool",namespace="prod"}`)
+		require.Contains(t, source.expr, `llm_d_epp_ready_endpoints{name="my-pool",namespace="prod"}`)
 	})
 }
 

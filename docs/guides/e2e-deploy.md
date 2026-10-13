@@ -250,8 +250,8 @@ kubectl get pods -n ${NAMESPACE}
 
 # At startup, "prometheus-budget metric source" lines print the PromQL each cascade
 # source resolved to, indexed 0-2. Then "metric source resolved" reports which one
-# answered — expect sourceIndex=1 (EPP per-pod queue depth), since the llm-d router's
-# EPP does not enable the flow control plugin source 0 needs.
+# answered — expect sourceIndex=1 (EPP per-pod in-flight requests, running plus waiting),
+# since the llm-d router's EPP does not enable the flow control plugin source 0 needs.
 # You should NOT see "all metric sources unavailable".
 kubectl logs -n ${NAMESPACE} -l app.kubernetes.io/name=llm-d-async --tail=20
 
@@ -282,7 +282,7 @@ echo "vLLM metrics available."
 # nothing, and source 0 needs EPP's flow control plugin.
 kubectl run --rm -i prom-budget --image=curlimages/curl --restart=Never -n ${NAMESPACE} -- \
     curl -s --data-urlencode \
-    'query=1 - (avg by(name)(llm_d_epp_per_endpoint_queue_size{name="optimized-baseline"}) / 100)' \
+    'query=(1 - (avg by(name)(llm_d_epp_average_running_requests{name="optimized-baseline"} + llm_d_epp_average_queue_size{name="optimized-baseline"}) / 100)) and on() (llm_d_epp_ready_endpoints{name="optimized-baseline"} > 0)' \
     'http://llmd-kube-prometheus-stack-prometheus.llm-d-monitoring.svc.cluster.local:9090/api/v1/query'
 # Expected: value = 1
 
@@ -412,12 +412,13 @@ kubectl run --rm -i prom-running --image=curlimages/curl --restart=Never -n ${NA
     'http://llmd-kube-prometheus-stack-prometheus.llm-d-monitoring.svc.cluster.local:9090/api/v1/query'
 # Expected: vllm:num_requests_running = 200 (saturated)
 
-# Verify budget is negative (gate closed)
+# Verify budget is negative (gate closed). This is the gate's own source 1 query, so
+# it reads what the gate reads.
 kubectl run --rm -i prom-budget --image=curlimages/curl --restart=Never -n ${NAMESPACE} -- \
     curl -s --data-urlencode \
-    'query=1 - (sum(vllm:num_requests_running{inference_pool="optimized-baseline"}) / on() (llm_d_epp_ready_endpoints{name="optimized-baseline"} * 100))' \
+    'query=(1 - (avg by(name)(llm_d_epp_average_running_requests{name="optimized-baseline"} + llm_d_epp_average_queue_size{name="optimized-baseline"}) / 100)) and on() (llm_d_epp_ready_endpoints{name="optimized-baseline"} > 0)' \
     'http://llmd-kube-prometheus-stack-prometheus.llm-d-monitoring.svc.cluster.local:9090/api/v1/query'
-# Expected: value = -1 (200 running / 100 max = 200% utilization)
+# Expected: value = -1 (200 in flight / 100 max = 200% utilization)
 
 # 3. Push async requests while gate is closed
 kubectl run --rm -i push-async --image=redis --restart=Never -n ${NAMESPACE} \
@@ -462,10 +463,11 @@ kubectl run --rm -i prom-running --image=curlimages/curl --restart=Never -n ${NA
     'http://llmd-kube-prometheus-stack-prometheus.llm-d-monitoring.svc.cluster.local:9090/api/v1/query'
 # Expected: vllm:num_requests_running ~= 110 (saturated)
 
-# Verify budget is negative (gate closed)
+# Verify budget is negative (gate closed). This is the gate's own source 1 query, so
+# it reads what the gate reads.
 kubectl run --rm -i prom-budget --image=curlimages/curl --restart=Never -n ${NAMESPACE} -- \
     curl -s --data-urlencode \
-    'query=1 - (sum(vllm:num_requests_running{inference_pool="optimized-baseline"}) / on() (llm_d_epp_ready_endpoints{name="optimized-baseline"} * 100))' \
+    'query=(1 - (avg by(name)(llm_d_epp_average_running_requests{name="optimized-baseline"} + llm_d_epp_average_queue_size{name="optimized-baseline"}) / 100)) and on() (llm_d_epp_ready_endpoints{name="optimized-baseline"} > 0)' \
     'http://llmd-kube-prometheus-stack-prometheus.llm-d-monitoring.svc.cluster.local:9090/api/v1/query'
 # Expected: value ~= -0.1 (gate closed)
 

@@ -95,8 +95,10 @@ func (f *GateFactory) Close() error {
 //     using the first that returns a sample.
 //     [0] D = 1 − (queue_size / max_SYS) via llm_d_epp_flow_control_queue_size.
 //     Requires llm-d's flow control plugin, which the llm-d router does not enable.
-//     [1] D = 1 − (mean per-pod queue depth / max_concurrency) via llm_d_epp_per_endpoint_queue_size.
-//     Part of EPP's base metric set, so this is the source a stock install lands on.
+//     [1] D = 1 − (mean per-pod in-flight requests / max_concurrency), in-flight being running
+//     plus waiting, via llm_d_epp_average_running_requests + llm_d_epp_average_queue_size,
+//     gated on llm_d_epp_ready_endpoints > 0. Part of EPP's base metric set, so this is the
+//     source a stock install lands on.
 //     [2] D = 1 − (vllm_running / max_SYS). Filters vLLM metrics by inference_pool label,
 //     which vLLM does not emit natively — model server pods must carry this label and
 //     Prometheus must be configured with metric relabeling to propagate it
@@ -328,7 +330,7 @@ func (f *GateFactory) CreateGate(cfg pipeline.GateConfig) (pipeline.Gate, error)
 		if err != nil {
 			return nil, err
 		}
-		poolQueueSource, err := NewPoolQueueSizePromQL(promConfig, pool, maxConcurrency, namespace)
+		poolInFlightSource, err := NewPoolInFlightPromQL(promConfig, pool, maxConcurrency, namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -337,7 +339,7 @@ func (f *GateFactory) CreateGate(cfg pipeline.GateConfig) (pipeline.Gate, error)
 			return nil, err
 		}
 
-		sources := []*PromQLMetricSource{flowControlSource, poolQueueSource, vllmSource}
+		sources := []*PromQLMetricSource{flowControlSource, poolInFlightSource, vllmSource}
 		cascaded := make([]MetricSource, 0, len(sources))
 		for i, s := range sources {
 			f.logger.Info("prometheus-budget metric source",

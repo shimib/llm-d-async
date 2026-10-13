@@ -326,11 +326,13 @@ func TestGateFactory_BudgetGateCascadeSources(t *testing.T) {
 		exprs[i] = promSource.expr
 	}
 
-	// Flow control stays first for installs that enable the plugin; the metric a
-	// stock EPP always exports is next, so the cascade resolves without it; vLLM
-	// last because it needs scrape-time relabeling to carry inference_pool.
+	// Flow control stays first for installs that enable the plugin; the pool
+	// averages a stock EPP always exports are next, so the cascade resolves
+	// without it; vLLM last because it needs scrape-time relabeling to carry
+	// inference_pool.
 	assert.Contains(t, exprs[0], "llm_d_epp_flow_control_queue_size")
-	assert.Contains(t, exprs[1], "llm_d_epp_per_endpoint_queue_size")
+	assert.Contains(t, exprs[1], "llm_d_epp_average_running_requests")
+	assert.Contains(t, exprs[1], "llm_d_epp_average_queue_size")
 	assert.Contains(t, exprs[2], "vllm:num_requests_running")
 }
 
@@ -346,7 +348,7 @@ func TestGateFactory_BudgetGateLogsResolvedQueries(t *testing.T) {
 
 	joined := strings.Join(logged, "\n")
 	assert.Contains(t, joined, "llm_d_epp_flow_control_queue_size")
-	assert.Contains(t, joined, "llm_d_epp_per_endpoint_queue_size")
+	assert.Contains(t, joined, "llm_d_epp_average_running_requests")
 	assert.Contains(t, joined, "vllm:num_requests_running")
 
 	// The resolved closing point goes to the same logger as the source queries.

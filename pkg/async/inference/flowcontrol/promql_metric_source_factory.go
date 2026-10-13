@@ -81,41 +81,50 @@ func NewFlowControlQueueSizePromQL(promConfig promapi.Config, inferencePool stri
 	return source, nil
 }
 
-// NewPoolQueueSizePromQL builds a PromQLMetricSource that returns the model server queue depth
-// EPP reports per pod as a dispatch budget D = 1 − (mean per-pod queue depth / maxConcurrency).
+// NewPoolInFlightPromQL builds a PromQLMetricSource that returns the mean in-flight load per
+// model server pod as a dispatch budget D = 1 − (mean per-pod in-flight requests / maxConcurrency),
+// where in-flight is running plus waiting at the model server.
 //
-// llm_d_epp_flow_control_queue_size is only recorded when EPP runs the flow control
-// plugin, which the llm-d router does not enable. llm_d_epp_per_endpoint_queue_size is part of
-// EPP's base metric set, so this source resolves on a stock install.
+// Both terms are needed. maxConcurrency mirrors MaxConcurrency in the inference scheduler's
+// saturation detector, which counts every request dispatched to a pod and not yet finished.
+// vLLM admits up to max_num_seqs (256 by default) into the running batch before anything
+// waits, so a source that reads only the waiting queue sees 0 while a pod already serves two
+// and a half times the configured capacity, and the gate stays open through exactly the
+// overload it is meant to shed.
+//
+// llm_d_epp_flow_control_queue_size is only recorded when EPP runs the flow control plugin,
+// which the llm-d router does not enable. llm_d_epp_average_running_requests and
+// llm_d_epp_average_queue_size are part of EPP's base metric set, so this source resolves on a
+// stock install.
 //
 // Averaging over pods is what makes max_SYS = ready_pods × maxConcurrency reduce to
-// maxConcurrency, so this needs no llm_d_epp_ready_endpoints join. That matters for more than
-// brevity: EPP's metrics refresh returns early when the pool has no pods, freezing
-// llm_d_epp_ready_endpoints (and llm_d_epp_average_queue_size, which is why that metric is
-// not used here) at their last values. A drained pool would then read as idle capacity.
-// llm_d_epp_per_endpoint_queue_size is emitted by a scrape-time collector instead, so it simply
-// stops reporting — the query yields no samples and the cascade moves on rather than opening
-// the gate onto a pool with nothing behind it.
+// maxConcurrency. EPP's metrics refresh returns early when the pool has no fresh pods, which
+// freezes the two averages at their last values; a drained pool would then read as idle
+// capacity. llm_d_epp_ready_endpoints is recorded before that early return (GAIE #2049, in
+// llm-d-router v0.11.0 and later), so the query is gated on it being positive: with no ready
+// pods it yields no samples and the cascade moves on rather than opening the gate onto a pool
+// with nothing behind it.
 //
-// avg is sum/count over the per-pod series, so the result does not change when several EPP
-// replicas each report the same pods. EPP labels its llm_d_epp_* pool series with "name", not
-// "inference_pool" (the same label llm_d_epp_ready_endpoints uses above).
+// avg by(name) collapses the series several EPP replicas export for the same pool. EPP labels
+// its llm_d_epp_* pool series with "name", not "inference_pool".
 // inferencePool and maxConcurrency are required.
-func NewPoolQueueSizePromQL(promConfig promapi.Config, inferencePool string, maxConcurrency float64, namespace string) (*PromQLMetricSource, error) {
+func NewPoolInFlightPromQL(promConfig promapi.Config, inferencePool string, maxConcurrency float64, namespace string) (*PromQLMetricSource, error) {
 	if inferencePool == "" {
-		return nil, fmt.Errorf("inference pool name is required for pool queue size PromQL")
+		return nil, fmt.Errorf("inference pool name is required for pool in-flight PromQL")
 	}
 	if maxConcurrency <= 0 {
 		return nil, fmt.Errorf("maxConcurrency must be positive, got %g", maxConcurrency)
 	}
-	queueLabels := map[string]string{"name": inferencePool}
+	poolLabels := map[string]string{"name": inferencePool}
 	if namespace != "" {
-		queueLabels["namespace"] = namespace
+		poolLabels["namespace"] = namespace
 	}
 	query := fmt.Sprintf(
-		`1 - (avg by(name)(%s) / %g)`,
-		buildPromQL("llm_d_epp_per_endpoint_queue_size", queueLabels),
+		`(1 - (avg by(name)(%s + %s) / %g)) and on() (%s > 0)`,
+		buildPromQL("llm_d_epp_average_running_requests", poolLabels),
+		buildPromQL("llm_d_epp_average_queue_size", poolLabels),
 		maxConcurrency,
+		buildPromQL("llm_d_epp_ready_endpoints", poolLabels),
 	)
 	source, err := NewPromQLMetricSource(promConfig, query)
 	if err != nil {

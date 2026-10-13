@@ -571,17 +571,21 @@ The available gate types, at a glance:
   | # | Metric | Budget | Available when |
   |---|--------|--------|----------------|
   | 0 | `llm_d_epp_flow_control_queue_size` | `D = 1 − (queue_size / max_SYS)` | EPP runs the flow control plugin |
-  | 1 | `llm_d_epp_per_endpoint_queue_size` | `D = 1 − (mean per-pod queue depth / max_concurrency)` | Always — part of EPP's base metric set |
+  | 1 | `llm_d_epp_average_running_requests` + `llm_d_epp_average_queue_size` | `D = 1 − (mean per-pod in-flight requests / max_concurrency)` | Always — part of EPP's base metric set |
   | 2 | `vllm:num_requests_running` | `D = 1 − (running_requests / max_SYS)` | vLLM metrics carry an `inference_pool` label |
 
   Sources 0 and 2 compute `max_SYS = ready_pods × max_concurrency` dynamically from the
   `llm_d_epp_ready_endpoints` metric. Source 1 averages over pods, so the `ready_pods` factor
-  cancels and no join is needed. That also keeps it honest when the pool drains: EPP's metrics
-  refresh [returns early when the pool has no pods](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.2.1/pkg/epp/backend/metrics/logger.go#L89-L91),
-  so `llm_d_epp_ready_endpoints` and `llm_d_epp_average_queue_size` freeze at their last
-  values and a scaled-to-zero pool would read as idle capacity. `llm_d_epp_per_endpoint_queue_size`
-  comes from a scrape-time collector that simply stops reporting, so the source yields no sample
-  and the cascade moves on instead.
+  cancels. It counts requests **running plus waiting** at the model server, which is what
+  `max_concurrency` means in the inference scheduler's saturation detector: every request
+  dispatched to a pod and not yet finished. A source that read only the waiting queue would
+  stay at full budget while vLLM runs up to `max_num_seqs` (256 by default) requests per pod,
+  well past the configured capacity.
+  EPP's metrics refresh [returns early when the pool has no fresh pods](https://github.com/llm-d/llm-d-inference-scheduler/blob/v0.11.0/pkg/epp/datalayer/logger/logger.go#L116-L120),
+  so the two averages freeze at their last values and a scaled-to-zero pool would read as idle
+  capacity. `llm_d_epp_ready_endpoints` is recorded before that return, so source 1 is gated on
+  it being positive: with no ready pods the query yields no sample and the cascade moves on
+  instead.
   The gate closes when `D ≤ baseline`; when open it returns `D − baseline`, so callers compute `N = max_SYS × (D − B)`.
   See [docs/dispatch-budget.md](docs/dispatch-budget.md) for the full derivation.
 
@@ -590,7 +594,7 @@ The available gate types, at a glance:
   of them or fell back to `fallback`.
 
   - `pool` (**required**): The InferencePool name. This must match the `name` field in
-    `llm_d_epp_ready_endpoints{name="<pool>"}` and `llm_d_epp_per_endpoint_queue_size{name="<pool>"}`
+    `llm_d_epp_ready_endpoints{name="<pool>"}` and `llm_d_epp_average_running_requests{name="<pool>"}`
     (EPP metrics) and, for the vLLM source, the `inference_pool` label on scraped vLLM metrics
     (added via relabeling from pod labels).
   - `namespace` (optional): Kubernetes namespace to scope metric queries. Required when multiple namespaces share the same pool name with a shared Prometheus instance.
@@ -633,7 +637,8 @@ The available gate types, at a glance:
     Set `max_concurrency` to that peak. Values well above it mean the gate never closes; values
     well below it mean the gate sheds while the pool still has room.
 
-  **Metric prerequisites:** none for source 1, which is why it is in the cascade — the llm-d router's
+  **Metric prerequisites:** none for source 1 beyond an EPP from llm-d-router v0.11.0 or later,
+  which is why it is in the cascade — the llm-d router's
   EPP does not enable the flow control plugin source 0 needs, and source 2 filters by the
   `inference_pool` label, which vLLM does not emit natively. To use source 2, configure Prometheus
   relabeling to propagate that label from model server pod labels (the helm chart handles this):
